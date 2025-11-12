@@ -35,9 +35,9 @@ const flipButton = document.getElementById("{uniqueID}_flip");
 const zSetButton = document.getElementById("{uniqueID}_z_set");
 const deleteButton = document.getElementById("{uniqueID}_delete");
 
-const saveButton = document.getElementById("{uniqueID}_save");
-const loadButton = document.getElementById("{uniqueID}_load");
-const loadInput = document.getElementById("{uniqueID}_load_input");
+const exportButton = document.getElementById("{uniqueID}_export");
+const importButton = document.getElementById("{uniqueID}_import");
+const importInput = document.getElementById("{uniqueID}_import_input");
 
 flipButton.addEventListener('click', ()=>{
 	points.reverse();
@@ -63,26 +63,26 @@ deleteButton.addEventListener('click', async ()=>{
 	}
 });
 
-saveButton.addEventListener('click', () => {
-	saveWaypointsToFile();
+exportButton.addEventListener('click', () => {
+	exportWaypointsToFile();
 });
 
-loadButton.addEventListener('click', () => {
-	loadInput.click();
+importButton.addEventListener('click', () => {
+	importInput.click();
 });
 
-loadInput.addEventListener('change', (event) => {
+importInput.addEventListener('change', (event) => {
 	const file = event.target.files[0];
 	if (file) {
-		loadWaypointsFromFile(file);
+		importWaypointsFromFile(file);
 	}
 });
 
 // File operations
 
-function saveWaypointsToFile() {
+function exportWaypointsToFile() {
 	if (points.length === 0) {
-		status.setWarn("No waypoints to save");
+		status.setWarn("No waypoints to export");
 		return;
 	}
 
@@ -115,10 +115,10 @@ function saveWaypointsToFile() {
 	document.body.removeChild(a);
 	URL.revokeObjectURL(url);
 
-	status.setOK("Waypoints saved successfully");
+	status.setOK("Waypoints exported successfully");
 }
 
-async function loadWaypointsFromFile(file) {
+async function importWaypointsFromFile(file) {
 	try {
 		const text = await file.text();
 		const data = JSON.parse(text);
@@ -130,20 +130,20 @@ async function loadWaypointsFromFile(file) {
 
 		// Ask user if they want to replace existing waypoints
 		if (points.length > 0) {
-			const replace = await confirm("Replace existing waypoints with loaded data?");
+			const replace = await confirm("Replace existing waypoints with imported data?");
 			if (!replace) {
 				return;
 			}
 		}
 
-		// Load waypoints
+		// Import waypoints
 		points = data.waypoints.map(wp => ({
 			x: wp.x || 0,
 			y: wp.y || 0,
 			z: wp.z || 0
 		}));
 
-		// Load settings if available
+		// Import settings if available
 		if (data.settings) {
 			if (data.settings.margin !== undefined) {
 				margin.value = data.settings.margin;
@@ -166,15 +166,15 @@ async function loadWaypointsFromFile(file) {
 
 		drawWaypoints();
 		saveSettings();
-		status.setOK(`Loaded ${points.length} waypoints successfully`);
+		status.setOK(`Imported ${points.length} waypoints successfully`);
 
 		// Clear the file input for next use
-		loadInput.value = '';
+		importInput.value = '';
 
 	} catch (error) {
-		console.error("Error loading waypoints:", error);
-		status.setError(`Failed to load waypoints: ${error.message}`);
-		loadInput.value = '';
+		console.error("Error importing waypoints:", error);
+		status.setError(`Failed to import waypoints: ${error.message}`);
+		importInput.value = '';
 	}
 }
 
