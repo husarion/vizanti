@@ -56,16 +56,30 @@
 
 		<div class="spacer"></div>
 
+		<h4>Mission Selector</h4>
+    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+      <label for="{uniqueID}_mission_select">Mission:</label>
+      <select id="{uniqueID}_mission_select" style="flex: 1;">
+        <option value="">-- Select Mission --</option>
+      </select>
+      <button id="{uniqueID}_load_mission" style="background-color: rgb(31, 52, 78);">Load</button>
+      <button id="{uniqueID}_delete_mission" style="background-color: rgb(104, 78, 31);">Delete</button>
+    </div>
+    <div style="display: flex; gap: 10px; align-items: center;">
+			<input type="text" id="{uniqueID}_mission_name" placeholder="Mission name..." style="flex: 1;">
+      <button id="{uniqueID}_save_mission" style="background-color: rgb(31, 78, 52);">Save Current Mission</button>
+    </div>
+
+		<h4>Export/Import Missions</h4>
+		<div style="display: flex; gap: 10px; align-items: center;">
+			<button id="{uniqueID}_export">⇑ Export</button>
+			<input type="file" id="{uniqueID}_import_input" accept=".json" style="display: none;">
+			<button id="{uniqueID}_import">⇓ Import</button>
+		</div>
+
 		<h4>Clear Path</h4>
 
 		<button id="{uniqueID}_delete" style="background-color: rgb(104, 78, 31);">Remove all waypoints</button>
-
-		<h4>Export/Import Waypoints</h4>
-		<div style="display: flex; gap: 10px; align-items: center;">
-			<button id="{uniqueID}_export" style="background-color: rgb(31, 78, 52);">⇑ Export</button>
-			<input type="file" id="{uniqueID}_import_input" accept=".json" style="display: none;">
-			<button id="{uniqueID}_import" style="background-color: rgb(31, 52, 78);">⇓ Import</button>
-		</div>
 
 		<div class="spacer"></div>
 
