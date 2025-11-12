@@ -35,6 +35,10 @@ const flipButton = document.getElementById("{uniqueID}_flip");
 const zSetButton = document.getElementById("{uniqueID}_z_set");
 const deleteButton = document.getElementById("{uniqueID}_delete");
 
+const saveButton = document.getElementById("{uniqueID}_save");
+const loadButton = document.getElementById("{uniqueID}_load");
+const loadInput = document.getElementById("{uniqueID}_load_input");
+
 flipButton.addEventListener('click', ()=>{
 	points.reverse();
 	drawWaypoints();
@@ -58,6 +62,121 @@ deleteButton.addEventListener('click', async ()=>{
 		saveSettings();
 	}
 });
+
+saveButton.addEventListener('click', () => {
+	saveWaypointsToFile();
+});
+
+loadButton.addEventListener('click', () => {
+	loadInput.click();
+});
+
+loadInput.addEventListener('change', (event) => {
+	const file = event.target.files[0];
+	if (file) {
+		loadWaypointsFromFile(file);
+	}
+});
+
+// File operations
+
+function saveWaypointsToFile() {
+	if (points.length === 0) {
+		status.setWarn("No waypoints to save");
+		return;
+	}
+
+	const waypointData = {
+		version: "1.0",
+		timestamp: new Date().toISOString(),
+		fixed_frame: fixed_frame,
+		base_link_frame: base_link_frame,
+		waypoints: points.map((point, index) => ({
+			index: index,
+			x: point.x,
+			y: point.y,
+			z: point.z
+		})),
+		settings: {
+			margin: margin.value,
+			start_closest: startCheckbox.checked
+		}
+	};
+
+	const jsonString = JSON.stringify(waypointData, null, 2);
+	const blob = new Blob([jsonString], { type: 'application/json' });
+	const url = URL.createObjectURL(blob);
+	
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = `waypoints_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+	document.body.appendChild(a);
+	a.click();
+	document.body.removeChild(a);
+	URL.revokeObjectURL(url);
+
+	status.setOK("Waypoints saved successfully");
+}
+
+async function loadWaypointsFromFile(file) {
+	try {
+		const text = await file.text();
+		const data = JSON.parse(text);
+
+		// Validate file format
+		if (!data.waypoints || !Array.isArray(data.waypoints)) {
+			throw new Error("Invalid file format: missing waypoints array");
+		}
+
+		// Ask user if they want to replace existing waypoints
+		if (points.length > 0) {
+			const replace = await confirm("Replace existing waypoints with loaded data?");
+			if (!replace) {
+				return;
+			}
+		}
+
+		// Load waypoints
+		points = data.waypoints.map(wp => ({
+			x: wp.x || 0,
+			y: wp.y || 0,
+			z: wp.z || 0
+		}));
+
+		// Load settings if available
+		if (data.settings) {
+			if (data.settings.margin !== undefined) {
+				margin.value = data.settings.margin;
+			}
+			if (data.settings.start_closest !== undefined) {
+				startCheckbox.checked = data.settings.start_closest;
+			}
+		}
+
+		// Update frames if they exist in the file and are available
+		if (data.fixed_frame && tf.frame_list.has(data.fixed_frame)) {
+			fixed_frame = data.fixed_frame;
+			fixedFrameBox.value = fixed_frame;
+		}
+
+		if (data.base_link_frame && tf.frame_list.has(data.base_link_frame)) {
+			base_link_frame = data.base_link_frame;
+			baseLinkFrameBox.value = base_link_frame;
+		}
+
+		drawWaypoints();
+		saveSettings();
+		status.setOK(`Loaded ${points.length} waypoints successfully`);
+
+		// Clear the file input for next use
+		loadInput.value = '';
+
+	} catch (error) {
+		console.error("Error loading waypoints:", error);
+		status.setError(`Failed to load waypoints: ${error.message}`);
+		loadInput.value = '';
+	}
+}
 
 startCheckbox.addEventListener('change', ()=>{
 	drawWaypoints();
