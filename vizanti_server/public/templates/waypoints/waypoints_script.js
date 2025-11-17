@@ -114,8 +114,8 @@ missionSelect.addEventListener('change', () => {
 });
 
 recordIntervalInput.addEventListener('change', () => {
-  recordingInterval = parseFloat(recordIntervalInput.value);
-  saveSettings();
+	recordingInterval = parseFloat(recordIntervalInput.value);
+	saveSettings();
 });
 
 // File operations
@@ -369,82 +369,82 @@ updateMissionSelect();
 // Position recording
 
 function startPositionRecording() {
-  if (!base_link_frame || base_link_frame === "") {
-    status.setWarn("Please select a robot frame first");
-    return;
-  }
+	if (!base_link_frame || base_link_frame === "") {
+		status.setWarn("Please select a robot frame first");
+		return;
+	}
 
-  recordingInterval = parseFloat(recordIntervalInput.value);
-  
-  isRecording = true;
-  lastRecordedPosition = null;
-  
-  // Start recording loop at 10Hz
-  recordingTimer = setInterval(() => {
-    recordCurrentPosition();
-  }, 100);
-  
-  status.setOK(`Started recording waypoints from ${base_link_frame} frame`);
+	recordingInterval = parseFloat(recordIntervalInput.value);
+	
+	isRecording = true;
+	lastRecordedPosition = null;
+	
+	// Start recording loop at 10Hz
+	recordingTimer = setInterval(() => {
+		recordCurrentPosition();
+	}, 100);
+	
+	status.setOK(`Started recording waypoints from ${base_link_frame} frame`);
 }
 
 function stopPositionRecording() {
 	if (!isRecording) return;
 
-  if (recordingTimer) {
-    clearInterval(recordingTimer);
-    recordingTimer = null;
-  }
+	if (recordingTimer) {
+		clearInterval(recordingTimer);
+		recordingTimer = null;
+	}
 
-  isRecording = false;
-  lastRecordedPosition = null;
-  
-  status.setOK("Stopped recording waypoints");
-  saveSettings();
+	isRecording = false;
+	lastRecordedPosition = null;
+	
+	status.setOK("Stopped recording waypoints");
+	saveSettings();
 }
 
 function recordCurrentPosition() {
-  if (!isRecording) return;
+	if (!isRecording) return;
 
-  try {
-    const robotTransform = tf.transformPose(
-      base_link_frame,
-      fixed_frame,
-      { x: 0, y: 0, z: 0 },
-      new Quaternion()
-    );
+	try {
+		const robotTransform = tf.transformPose(
+			base_link_frame,
+			fixed_frame,
+			{ x: 0, y: 0, z: 0 },
+			new Quaternion()
+		);
 
-    const currentPosition = robotTransform.translation;
+		const currentPosition = robotTransform.translation;
 
-    if (shouldRecordPoint(currentPosition)) {
-      points.push({
-        x: currentPosition.x,
-        y: currentPosition.y,
-        z: currentPosition.z
-      });
+		if (shouldRecordPoint(currentPosition)) {
+			points.push({
+				x: currentPosition.x,
+				y: currentPosition.y,
+				z: currentPosition.z
+			});
 
-      lastRecordedPosition = currentPosition;
-      drawWaypoints();
-      
-      status.setOK(`Recording... ${points.length} waypoints`);
-    }
+			lastRecordedPosition = currentPosition;
+			drawWaypoints();
+			
+			status.setOK(`Recording... ${points.length} waypoints`);
+		}
 
-  } catch (error) {
-    console.warn("Failed to get robot position from TF:", error);
-  }
+	} catch (error) {
+		console.warn("Failed to get robot position from TF:", error);
+	}
 }
 
 function shouldRecordPoint(currentPosition) {
-  if (lastRecordedPosition === null) {
-    return true;
-  }
+	if (lastRecordedPosition === null) {
+		return true;
+	}
 
-  const distance = Math.sqrt(
-    Math.pow(currentPosition.x - lastRecordedPosition.x, 2) +
-    Math.pow(currentPosition.y - lastRecordedPosition.y, 2) +
-    Math.pow(currentPosition.z - lastRecordedPosition.z, 2)
-  );
+	const distance = Math.sqrt(
+		Math.pow(currentPosition.x - lastRecordedPosition.x, 2) +
+		Math.pow(currentPosition.y - lastRecordedPosition.y, 2) +
+		Math.pow(currentPosition.z - lastRecordedPosition.z, 2)
+	);
 
-  return distance >= recordingInterval;
+	return distance >= recordingInterval;
 }
 
 // Settings
@@ -460,7 +460,7 @@ if(settings.hasOwnProperty("{uniqueID}")){
 	startCheckbox.checked = loaded_data.start_closest;
 
 	recordingInterval = loaded_data.recording_interval ?? 1.0;
-  recordIntervalInput.value = recordingInterval;
+	recordIntervalInput.value = recordingInterval;
 
 	if(loaded_data.topic_type != undefined)
 		typedict[topic] = loaded_data.topic_type;
@@ -1286,12 +1286,12 @@ function setMode(newmode){
 
 		case "RECORD":
 			startPositionRecording();
-      removeListeners();
-      icon.style.backgroundColor = "rgba(255, 75, 75, 1.0)";
-      view_container.style.cursor = "";
-      buttontext.innerText = "REC";
-      canvas.style.zIndex = "2";
-      break;
+			removeListeners();
+			icon.style.backgroundColor = "rgba(255, 75, 75, 1.0)";
+			view_container.style.cursor = "";
+			buttontext.innerText = "REC";
+			canvas.style.zIndex = "2";
+			break;
 	}
 
 	drawWaypoints();
@@ -1464,9 +1464,9 @@ document.addEventListener("click", (event) => {
 });
 
 window.addEventListener('beforeunload', () => {
-  if (isRecording) {
-    stopPositionRecording();
-  }
+	if (isRecording) {
+		stopPositionRecording();
+	}
 });
 
 const drop_start = document.getElementById("{uniqueID}_sendAction");
@@ -1493,8 +1493,8 @@ drop_stop.addEventListener("click", (event) => {
 });
 
 drop_record.addEventListener("click", (event) => {
-  setMode("RECORD");
-  dropdown_visibility(false);
+	setMode("RECORD");
+	dropdown_visibility(false);
 });
 
 drop_xy.addEventListener("click", (event) => {
