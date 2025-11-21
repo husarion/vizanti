@@ -45,6 +45,13 @@ const saveMissionButton = document.getElementById("{uniqueID}_save_mission");
 const loadMissionButton = document.getElementById("{uniqueID}_load_mission");
 const deleteMissionButton = document.getElementById("{uniqueID}_delete_mission");
 
+const recordIntervalInput = document.getElementById("{uniqueID}_record_interval");
+
+let isRecording = false;
+let lastRecordedPosition = null;
+let recordingInterval = 1.0;
+let recordingTimer = null;
+
 flipButton.addEventListener('click', ()=>{
 	points.reverse();
 	drawWaypoints();
@@ -94,6 +101,11 @@ deleteMissionButton.addEventListener('click', deleteMission);
 missionSelect.addEventListener('change', () => {
 	const selectedMission = missionSelect.value;
 	missionNameInput.value = selectedMission;
+});
+
+recordIntervalInput.addEventListener('change', () => {
+	recordingInterval = parseFloat(recordIntervalInput.value);
+	saveSettings();
 });
 
 // File operations
@@ -344,6 +356,87 @@ function updateMissionSelect() {
 // Initialize mission select
 updateMissionSelect();
 
+// Position recording
+
+function startPositionRecording() {
+	if (!base_link_frame || base_link_frame === "") {
+		status.setWarn("Please select a robot frame first");
+		return;
+	}
+
+	recordingInterval = parseFloat(recordIntervalInput.value);
+	
+	isRecording = true;
+	lastRecordedPosition = null;
+	
+	// Start recording loop at 10Hz
+	recordingTimer = setInterval(() => {
+		recordCurrentPosition();
+	}, 100);
+	
+	status.setOK(`Started recording waypoints from ${base_link_frame} frame`);
+}
+
+function stopPositionRecording() {
+	if (!isRecording) return;
+
+	if (recordingTimer) {
+		clearInterval(recordingTimer);
+		recordingTimer = null;
+	}
+
+	isRecording = false;
+	lastRecordedPosition = null;
+	
+	status.setOK("Stopped recording waypoints");
+	saveSettings();
+}
+
+function recordCurrentPosition() {
+	if (!isRecording) return;
+
+	try {
+		const robotTransform = tf.transformPose(
+			base_link_frame,
+			fixed_frame,
+			{ x: 0, y: 0, z: 0 },
+			new Quaternion()
+		);
+
+		const currentPosition = robotTransform.translation;
+
+		if (shouldRecordPoint(currentPosition)) {
+			points.push({
+				x: currentPosition.x,
+				y: currentPosition.y,
+				z: currentPosition.z
+			});
+
+			lastRecordedPosition = currentPosition;
+			drawWaypoints();
+			
+			status.setOK(`Recording... ${points.length} waypoints`);
+		}
+
+	} catch (error) {
+		console.warn("Failed to get robot position from TF:", error);
+	}
+}
+
+function shouldRecordPoint(currentPosition) {
+	if (lastRecordedPosition === null) {
+		return true;
+	}
+
+	const distance = Math.sqrt(
+		Math.pow(currentPosition.x - lastRecordedPosition.x, 2) +
+		Math.pow(currentPosition.y - lastRecordedPosition.y, 2) +
+		Math.pow(currentPosition.z - lastRecordedPosition.z, 2)
+	);
+
+	return distance >= recordingInterval;
+}
+
 // Settings
 
 if(settings.hasOwnProperty("{uniqueID}")){
@@ -355,6 +448,9 @@ if(settings.hasOwnProperty("{uniqueID}")){
 
 	margin.value = loaded_data.margin ?? 0.8;
 	startCheckbox.checked = loaded_data.start_closest;
+
+	recordingInterval = loaded_data.recording_interval ?? 1.0;
+	recordIntervalInput.value = recordingInterval;
 
 	if(loaded_data.topic_type != undefined)
 		typedict[topic] = loaded_data.topic_type;
@@ -382,7 +478,8 @@ function saveSettings(){
 		base_link_frame: base_link_frame,
 		points: points,
 		start_closest: startCheckbox.checked,
-		margin: margin.value
+		margin: margin.value,
+		recording_interval: recordingInterval
 	}
 	settings.save();
 }
@@ -1153,6 +1250,7 @@ function setMode(newmode){
 
 	switch(mode){
 		case "IDLE":
+			stopPositionRecording();
 			removeListeners()
 			icon.style.backgroundColor = "rgba(124, 124, 124, 0.3)";
 			view_container.style.cursor = "";
@@ -1174,6 +1272,15 @@ function setMode(newmode){
 			view_container.style.cursor = "pointer";
 			buttontext.innerText = "Z";
 			canvas.style.zIndex = "999";
+			break;
+
+		case "RECORD":
+			startPositionRecording();
+			removeListeners();
+			icon.style.backgroundColor = "rgba(255, 75, 75, 1.0)";
+			view_container.style.cursor = "";
+			buttontext.innerText = "REC";
+			canvas.style.zIndex = "2";
 			break;
 	}
 
@@ -1346,8 +1453,15 @@ document.addEventListener("click", (event) => {
 	}
 });
 
+window.addEventListener('beforeunload', () => {
+	if (isRecording) {
+		stopPositionRecording();
+	}
+});
+
 const drop_start = document.getElementById("{uniqueID}_sendAction");
 const drop_stop = document.getElementById("{uniqueID}_stopAction");
+const drop_record = document.getElementById("{uniqueID}_record");
 const drop_xy = document.getElementById("{uniqueID}_editXY");
 const drop_z = document.getElementById("{uniqueID}_editZ");
 const drop_config = document.getElementById("{uniqueID}_config");
@@ -1365,6 +1479,11 @@ drop_start.addEventListener("click", (event) => {
 
 drop_stop.addEventListener("click", (event) => {
 	sendMessage([]);
+	dropdown_visibility(false);
+});
+
+drop_record.addEventListener("click", (event) => {
+	setMode("RECORD");
 	dropdown_visibility(false);
 });
 

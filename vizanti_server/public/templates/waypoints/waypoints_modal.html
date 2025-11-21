@@ -25,6 +25,17 @@
 
 		<p style="color: #b4b4b4;">Defines a sequence of poses and publishes them as a nav_msgs/Path or geometry_msgs/PoseArray.</p>
 
+		<div class="spacer"></div>
+
+		<p><strong>Record:</strong> Record positions automatically based on robot position.</p>
+
+		<label for="{uniqueID}_record_interval">Recording Interval (meters):</label>
+		<input type="number" id="{uniqueID}_record_interval" value="1.0" step="0.1" min="0.1" max="10" style="width: 80px;">
+
+		<p style="color: #b4b4b4;">When recording positions, click the icon again to stop recording.</p>
+
+		<div class="spacer"></div>
+
 		<p><strong>X/Y Axis:</strong> Edit horizontal positions.</p>
 		<ul>
 			<li><strong style="color:rgb(167, 255, 196)">Add Points:</strong> Click on the view area.</li>
