@@ -81,32 +81,22 @@ startCheckbox.addEventListener('change', ()=>{
 	saveSettings();
 });
 
-exportButton.addEventListener('click', () => {
-	exportMissionsToFile();
-});
+exportButton.addEventListener('click', exportMissionsToFile);
 
 importButton.addEventListener('click', () => {
 	importInput.click();
 });
 
-importInput.addEventListener('change', (event) => {
+importInput.addEventListener('change', async (event) => {
 	const file = event.target.files[0];
 	if (file) {
-		importMissionsFromFile(file);
+		await importMissionsFromFile(file);
 	}
 });
 
-saveMissionButton.addEventListener('click', () => {
-	saveMission();
-});
-
-loadMissionButton.addEventListener('click', () => {
-	loadMission();
-});
-
-deleteMissionButton.addEventListener('click', () => {
-	deleteMission();
-});
+saveMissionButton.addEventListener('click', saveMission);
+loadMissionButton.addEventListener('click', loadMission);
+deleteMissionButton.addEventListener('click', deleteMission);
 
 missionSelect.addEventListener('change', () => {
 	const selectedMission = missionSelect.value;
@@ -132,7 +122,7 @@ function exportMissionsToFile() {
 	const exportData = {
 		version: "1.0",
 		export_type: "missions",
-		timestamp: new Date().toISOString(),
+		date: new Date().toISOString(),
 		missions: missions,
 		mission_count: missionNames.length
 	};
@@ -242,7 +232,7 @@ function saveMission() {
 
 	const missionData = {
 		name: missionName,
-		timestamp: new Date().toISOString(),
+		date: new Date().toISOString(),
 		fixed_frame: fixed_frame,
 		base_link_frame: base_link_frame,
 		waypoints: points.map((point, index) => ({
@@ -356,7 +346,7 @@ function updateMissionSelect() {
 	missionNames.forEach(name => {
 		const mission = missions[name];
 		const waypointCount = mission.waypoints ? mission.waypoints.length : 0;
-		const date = new Date(mission.timestamp).toLocaleDateString();
+		const date = new Date(mission.date).toLocaleDateString();
 		optionsHtml += `<option value="${name}">${name} (${waypointCount} points, ${date})</option>`;
 	});
 	
