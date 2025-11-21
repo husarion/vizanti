@@ -35,6 +35,16 @@ const flipButton = document.getElementById("{uniqueID}_flip");
 const zSetButton = document.getElementById("{uniqueID}_z_set");
 const deleteButton = document.getElementById("{uniqueID}_delete");
 
+const exportButton = document.getElementById("{uniqueID}_export");
+const importButton = document.getElementById("{uniqueID}_import");
+const importInput = document.getElementById("{uniqueID}_import_input");
+
+const missionSelect = document.getElementById("{uniqueID}_mission_select");
+const missionNameInput = document.getElementById("{uniqueID}_mission_name");
+const saveMissionButton = document.getElementById("{uniqueID}_save_mission");
+const loadMissionButton = document.getElementById("{uniqueID}_load_mission");
+const deleteMissionButton = document.getElementById("{uniqueID}_delete_mission");
+
 flipButton.addEventListener('click', ()=>{
 	points.reverse();
 	drawWaypoints();
@@ -63,6 +73,276 @@ startCheckbox.addEventListener('change', ()=>{
 	drawWaypoints();
 	saveSettings();
 });
+
+exportButton.addEventListener('click', exportMissionsToFile);
+
+importButton.addEventListener('click', () => {
+	importInput.click();
+});
+
+importInput.addEventListener('change', async (event) => {
+	const file = event.target.files[0];
+	if (file) {
+		await importMissionsFromFile(file);
+	}
+});
+
+saveMissionButton.addEventListener('click', saveMission);
+loadMissionButton.addEventListener('click', loadMission);
+deleteMissionButton.addEventListener('click', deleteMission);
+
+missionSelect.addEventListener('change', () => {
+	const selectedMission = missionSelect.value;
+	missionNameInput.value = selectedMission;
+});
+
+// File operations
+
+function exportMissionsToFile() {
+	const missions = getSavedMissions();
+	const missionNames = Object.keys(missions);
+	
+	if (missionNames.length === 0) {
+		status.setWarn("No saved missions to export");
+		return;
+	}
+
+	const exportData = {
+		version: "1.0",
+		export_type: "missions",
+		date: new Date().toISOString(),
+		missions: missions,
+		mission_count: missionNames.length
+	};
+
+	const jsonString = JSON.stringify(exportData, null, 2);
+	const blob = new Blob([jsonString], { type: 'application/json' });
+	const url = URL.createObjectURL(blob);
+	
+	const downloadLink = document.createElement('a');
+	downloadLink.href = url;
+	downloadLink.download = `waypoint_missions_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+	document.body.appendChild(downloadLink);
+	downloadLink.click();
+	document.body.removeChild(downloadLink);
+	URL.revokeObjectURL(url);
+
+	status.setOK(`Exported ${missionNames.length} missions successfully`);
+}
+
+async function importMissionsFromFile(file) {
+	try {
+		const text = await file.text();
+		const data = JSON.parse(text);
+
+		// Check if this is a missions export file
+		if (data.export_type !== "missions" || !data.missions) {
+			throw new Error("Invalid file format: not a missions export file");
+		}
+
+		const importedMissions = data.missions;
+		const importedNames = Object.keys(importedMissions);
+		
+		if (importedNames.length === 0) {
+			status.setWarn("No missions found in the file");
+			return;
+		}
+
+		const existingMissions = getSavedMissions();
+		const existingNames = Object.keys(existingMissions);
+		
+		// Check for name conflicts
+		const conflicts = importedNames.filter(name => existingNames.includes(name));
+		
+		if (conflicts.length > 0) {
+			const overwrite = await confirm(
+				`The following missions already exist and will be overwritten:\n${conflicts.join(', ')}\n\nDo you want to continue?`
+			);
+			if (!overwrite) {
+				status.setWarn("Import cancelled by user");
+				return;
+			}
+		}
+
+		// Merge missions
+		const mergedMissions = { ...existingMissions, ...importedMissions };
+		
+		const missionKey = getMissionKey();
+		settings[missionKey] = mergedMissions;
+		settings.save();
+
+		updateMissionSelect();
+		status.setOK(`Imported ${importedNames.length} missions successfully (${conflicts.length} overwritten)`);
+
+		// Clear the file input for next use
+		importInput.value = '';
+
+	} catch (error) {
+		console.error("Error importing missions:", error);
+		status.setError(`Failed to import missions: ${error.message}`);
+		importInput.value = '';
+	}
+}
+
+// Mission management
+
+function getMissionKey() {
+	return "{uniqueID}_missions";
+}
+
+function getSavedMissions() {
+	const missionKey = getMissionKey();
+	return settings[missionKey] || {};
+}
+
+function saveMission() {
+	const missionName = missionNameInput.value.trim();
+	if (!missionName) {
+		status.setWarn("Please enter a mission name");
+		return;
+	}
+
+	if (points.length === 0) {
+		status.setWarn("No waypoints to save");
+		return;
+	}
+
+	const missions = getSavedMissions();
+
+	// Check if mission already exists
+	if (missions[missionName]) {
+		const overwrite = confirm(`Mission "${missionName}" already exists. Do you want to overwrite it?`);
+		if (!overwrite) {
+			status.setWarn("Save cancelled by user");
+			return;
+		}
+	}
+
+	const missionData = {
+		name: missionName,
+		date: new Date().toISOString(),
+		fixed_frame: fixed_frame,
+		base_link_frame: base_link_frame,
+		waypoints: points.map((point, index) => ({
+			index: index,
+			x: point.x,
+			y: point.y,
+			z: point.z
+		})),
+		settings: {
+			margin: margin.value,
+			start_closest: startCheckbox.checked
+		}
+	};
+
+	missions[missionName] = missionData;
+	
+	const missionKey = getMissionKey();
+	settings[missionKey] = missions;
+	settings.save();
+
+	updateMissionSelect();
+	missionSelect.value = missionName;
+	status.setOK(`Mission "${missionName}" saved successfully`);
+}
+
+async function loadMission() {
+	const selectedMission = missionSelect.value;
+	if (!selectedMission) {
+		status.setWarn("Please select a mission to load");
+		return;
+	}
+
+	const missions = getSavedMissions();
+	const missionData = missions[selectedMission];
+	
+	if (!missionData) {
+		status.setError("Mission not found");
+		return;
+	}
+
+	// Ask user if they want to replace existing waypoints
+	if (points.length > 0) {
+		const replace = await confirm(`Replace current waypoints with mission "${selectedMission}"?`);
+		if (!replace) {
+			return;
+		}
+	}
+
+	// Load waypoints
+	points = missionData.waypoints.map(wp => ({
+		x: wp.x || 0,
+		y: wp.y || 0,
+		z: wp.z || 0
+	}));
+
+	// Load settings if available
+	if (missionData.settings) {
+		if (missionData.settings.margin !== undefined) {
+			margin.value = missionData.settings.margin;
+		}
+		if (missionData.settings.start_closest !== undefined) {
+			startCheckbox.checked = missionData.settings.start_closest;
+		}
+	}
+
+	// Update frames if they exist in the mission and are available
+	if (missionData.fixed_frame && tf.frame_list.has(missionData.fixed_frame)) {
+		fixed_frame = missionData.fixed_frame;
+		fixedFrameBox.value = fixed_frame;
+	}
+
+	if (missionData.base_link_frame && tf.frame_list.has(missionData.base_link_frame)) {
+		base_link_frame = missionData.base_link_frame;
+		baseLinkFrameBox.value = base_link_frame;
+	}
+
+	drawWaypoints();
+	saveSettings();
+	status.setOK(`Mission "${selectedMission}" loaded successfully (${points.length} waypoints)`);
+}
+
+async function deleteMission() {
+	const selectedMission = missionSelect.value;
+	if (!selectedMission) {
+		status.setWarn("Please select a mission to delete");
+		return;
+	}
+
+	const confirmDelete = await confirm(`Are you sure you want to delete mission "${selectedMission}"?`);
+	if (!confirmDelete) {
+		return;
+	}
+
+	const missions = getSavedMissions();
+	delete missions[selectedMission];
+	
+	const missionKey = getMissionKey();
+	settings[missionKey] = missions;
+	settings.save();
+
+	updateMissionSelect();
+	missionNameInput.value = "";
+	status.setOK(`Mission "${selectedMission}" deleted successfully`);
+}
+
+function updateMissionSelect() {
+	const missions = getSavedMissions();
+	const missionNames = Object.keys(missions).sort();
+	
+	let optionsHtml = '<option value="">-- Select Mission --</option>';
+	missionNames.forEach(name => {
+		const mission = missions[name];
+		const waypointCount = mission.waypoints ? mission.waypoints.length : 0;
+		const date = new Date(mission.date).toLocaleDateString();
+		optionsHtml += `<option value="${name}">${name} (${waypointCount} points, ${date})</option>`;
+	});
+	
+	missionSelect.innerHTML = optionsHtml;
+}
+
+// Initialize mission select
+updateMissionSelect();
 
 // Settings
 
@@ -1100,6 +1380,7 @@ drop_z.addEventListener("click", (event) => {
 
 drop_config.addEventListener("click", (event) => {
 	loadTopics();
+	updateMissionSelect();
 	openModal("{uniqueID}_modal");
 	dropdown_visibility(false);
 });
