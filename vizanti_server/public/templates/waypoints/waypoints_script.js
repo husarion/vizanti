@@ -161,10 +161,10 @@ async function exportMissionsToFile() {
 	if (exportAsGps) {
 		status.setOK("Converting coordinates to GPS...");
 
-		const toLLService = new ROSLIB.Service({
+		const toLLArrayService = new ROSLIB.Service({
 			ros: rosbridge.ros,
 			name: selectedGpsExportService,
-			serviceType: "robot_localization/srv/ToLL"
+			serviceType: "robot_localization/srv/ToLLArray"
 		});
 
 		try {
@@ -172,7 +172,7 @@ async function exportMissionsToFile() {
 				const mission = missions[missionName];
 				const convertedMission = { ...mission };
 
-				convertedMission.waypoints = await convertWaypointsToGps(mission.waypoints, toLLService);
+				convertedMission.waypoints = await convertWaypointsToGps(mission.waypoints, toLLArrayService);
 				exportData.missions[missionName] = convertedMission;
 			}
 		} catch (error) {
@@ -280,29 +280,28 @@ async function importMissionsFromFile(file) {
 	}
 }
 
-async function convertWaypointsToGps(waypoints, toLLService) {
-	const gpsWaypoints = [];
+async function convertWaypointsToGps(waypoints, toLLArrayService) {
+	const mapPoints = waypoints.map(waypoint => ({
+		x: waypoint.x,
+		y: waypoint.y,
+		z: waypoint.z
+	}));
 
-	for (const waypoint of waypoints) {
-		const request = new ROSLIB.ServiceRequest({
-			map_point: {
-				x: waypoint.x,
-				y: waypoint.y,
-				z: waypoint.z
-			}
-		});
+	const request = new ROSLIB.ServiceRequest({
+		map_points: mapPoints
+	});
 
-		const result = await new Promise((resolve, reject) => {
-			toLLService.callService(request, resolve, reject);
-		});
+	const result = await new Promise((resolve, reject) => {
+		toLLArrayService.callService(request, resolve, reject);
+	});
 
-		gpsWaypoints.push({
-			index: waypoint.index,
-			latitude: result.ll_point.latitude,
-			longitude: result.ll_point.longitude,
-			altitude: result.ll_point.altitude
-		});
-	}
+	// Convert result back to waypoint format
+	const gpsWaypoints = result.ll_points.map((llPoint, index) => ({
+		index: index,
+		latitude: llPoint.latitude,
+		longitude: llPoint.longitude,
+		altitude: llPoint.altitude
+	}));
 
 	return gpsWaypoints;
 }
@@ -336,16 +335,16 @@ async function convertGpsToWaypoints(gpsWaypoints, fromLLArrayService) {
 async function loadGpsServices() {
 	try {
 		console.log("Loading GPS coordinate services...");
-		const toLLServices = await rosbridge.get_services("robot_localization/srv/ToLL");
+		const toLLArrayServices = await rosbridge.get_services("robot_localization/srv/ToLLArray");
 		const fromLLArrayServices = await rosbridge.get_services("robot_localization/srv/FromLLArray");
 
 		let exportServiceList = "";
 		let importServiceList = "";
 
-		// Add ToLL services (fallback for export)
-		toLLServices.forEach(service => {
-			exportServiceList += `<option value='${service}'>${service} (ToLL)</option>`;
-			gpsExportServiceDict[service] = "robot_localization/srv/ToLL";
+		// Add ToLLArray services (fallback for export)
+		toLLArrayServices.forEach(service => {
+			exportServiceList += `<option value='${service}'>${service} (ToLLArray)</option>`;
+			gpsExportServiceDict[service] = "robot_localization/srv/ToLLArray";
 		});
 
 		// Add FromLLArray services (preferred for import)
@@ -358,7 +357,7 @@ async function loadGpsServices() {
 		gpsImportServiceBox.innerHTML = importServiceList;
 
 		if (exportServiceList === "") {
-			console.log(`No ToLL services found, defaulting to ${selectedGpsExportService}`);
+			console.log(`No ToLLArray services found, defaulting to ${selectedGpsExportService}`);
 			gpsExportServiceBox.innerHTML = `<option value='${selectedGpsExportService}'>${selectedGpsExportService} (default)</option>`;
 		}
 		if (importServiceList === "") {
@@ -366,7 +365,7 @@ async function loadGpsServices() {
 			gpsImportServiceBox.innerHTML = `<option value='${selectedGpsImportService}'>${selectedGpsImportService} (default)</option>`;
 		}
 
-		if (toLLServices.includes(selectedGpsExportService)) {
+		if (toLLArrayServices.includes(selectedGpsExportService)) {
 			gpsExportServiceBox.value = selectedGpsExportService;
 		} else {
 			selectedGpsExportService = gpsExportServiceBox.value;
@@ -642,7 +641,7 @@ if(settings.hasOwnProperty("{uniqueID}")){
 
 	useGpsCoordinatesCheckbox.checked = loaded_data.use_gps_coordinates;
 
-	selectedGpsExportService = loaded_data.gps_export_service ?? "/toLL";
+	selectedGpsExportService = loaded_data.gps_export_service ?? "/toLLArray";
 	selectedGpsImportService = loaded_data.gps_import_service ?? "/fromLLArray";
 
 	// Show GPS service container if GPS coordinates are enabled
