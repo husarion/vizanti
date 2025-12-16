@@ -2,7 +2,7 @@
 	<div class="modal_inner noselect">
 		<h3>Waypoint Mission</h3>
 		<p id="{uniqueID}_status" class="status">Status: Ok.</p>
-		<hr class="dark_hr"/>
+		<hr class="dark_hr" />
 
 		<label for="{uniqueID}_topic">Topic:</label>
 		<select id="{uniqueID}_topic" name="topic">
@@ -23,7 +23,8 @@
 			<option value="base_link">base_link</option>
 		</select>
 
-		<p style="color: #b4b4b4;">Defines a sequence of poses and publishes them as a nav_msgs/Path or geometry_msgs/PoseArray.</p>
+		<p style="color: #b4b4b4;">Defines a sequence of poses and publishes them as a nav_msgs/Path or
+			geometry_msgs/PoseArray.</p>
 
 		<div class="spacer"></div>
 
@@ -47,27 +48,6 @@
 		</p>
 		<p style="color: #b4b4b4;">When recording positions, click the icon again to stop recording.</p>
 
-		<div class="spacer"></div>
-
-		<p><strong>X/Y Axis:</strong> Edit horizontal positions.</p>
-		<ul>
-			<li><strong style="color:rgb(167, 255, 196)">Add Points:</strong> Click on the view area.</li>
-			<li><strong style="color:rgb(255, 185, 158)">Delete Points:</strong> Tap an existing point.</li>
-			<li><strong style="color:rgb(255, 254, 188)">Move Points:</strong> Drag an existing point to reposition it.</li>
-			<li><strong style="color: white">Snap to Grid:</strong> Hold the Shift key while dragging to snap to the pixel grid.</li>
-			<li><button id="{uniqueID}_flip" >Flip waypoint order</button></li>
-		</ul>
-		
-		<p><strong>Z Axis:</strong> Edit vertical positions.</p>
-		<ul>
-			<li><strong  style="color:rgb(255, 254, 188)">Set Height:</strong> Click and drag a point to set a rough Z value.</li>
-			<li><strong  style="color:rgb(255, 254, 188)">Fine Adjust:</strong> Release and drag a point a second time to fine adjust its height.</li>
-			<li><button id="{uniqueID}_z_set" >Set all Z values</button></li>
-		</ul>
-		
-		
-		<p style="color: #b4b4b4;">When editing X/Y/Z positions, click the icon again to stop editing.</p>
-		
 		<div class="spacer"></div>
 
 		<label for="{uniqueID}_margin">Safety margin visual indicator (meters):</label>
@@ -95,6 +75,23 @@
 		</div>
 
 		<h4>Export/Import Missions</h4>
+		<label>Use GPS coordinates:</label>
+		<input type="checkbox" id="{uniqueID}_use_gps_coordinates">
+
+		<div id="{uniqueID}_gps_service_container" style="display: none; margin-top: 10px;">
+      <label for="{uniqueID}_gps_export_service">GPS Export Service:</label>
+      <select id="{uniqueID}_gps_export_service" name="gps_export_service">
+        <option value="/toLL">/toLL</option>
+      </select>
+			<div class="spacer"></div>
+			<label for="{uniqueID}_gps_import_service">GPS Import Service:</label>
+			<select id="{uniqueID}_gps_import_service" name="gps_import_service">
+				<option value="/fromLLArray">/fromLLArray</option>
+			</select>
+    </div>
+
+		<div class="spacer"></div>
+
 		<div style="display: flex; gap: 10px; align-items: center;">
 			<button id="{uniqueID}_export">⇑ Export</button>
 			<input type="file" id="{uniqueID}_import_input" accept=".json" style="display: none;">
@@ -107,14 +104,37 @@
 
 		<div class="spacer"></div>
 
-		<p style="color: #b4b4b4;">Tip: If you're using a nav stack that doesn't use Paths or PoseArrays, but will accept simple goals, see the demo node at ros2 run vizanti_demos waypoints_to_simple_goals.py</p>
+		<p><strong>X/Y Axis:</strong> Edit horizontal positions.</p>
+		<ul>
+			<li><strong style="color:rgb(167, 255, 196)">Add Points:</strong> Click on the view area.</li>
+			<li><strong style="color:rgb(255, 185, 158)">Delete Points:</strong> Tap an existing point.</li>
+			<li><strong style="color:rgb(255, 254, 188)">Move Points:</strong> Drag an existing point to reposition it.</li>
+			<li><strong style="color: white">Snap to Grid:</strong> Hold the Shift key while dragging to snap to the pixel
+				grid.</li>
+			<li><button id="{uniqueID}_flip">Flip waypoint order</button></li>
+		</ul>
 
-		<hr class="dark_hr"/>
+		<p><strong>Z Axis:</strong> Edit vertical positions.</p>
+		<ul>
+			<li><strong style="color:rgb(255, 254, 188)">Set Height:</strong> Click and drag a point to set a rough Z value.
+			</li>
+			<li><strong style="color:rgb(255, 254, 188)">Fine Adjust:</strong> Release and drag a point a second time to fine
+				adjust its height.</li>
+			<li><button id="{uniqueID}_z_set">Set all Z values</button></li>
+		</ul>
+
+		<p style="color: #b4b4b4;">When editing X/Y/Z positions, click the icon again to stop editing.</p>
+
+		<div class="spacer"></div>
+
+		<p style="color: #b4b4b4;">Tip: If you're using a nav stack that doesn't use Paths or PoseArrays, but will accept
+			simple goals, see the demo node at ros2 run vizanti_demos waypoints_to_simple_goals.py</p>
+
+		<hr class="dark_hr" />
 
 		<div class="spacer"></div>
 
 		<button id="{uniqueID}_remove" class="delete_button" onclick="removeWidget('{uniqueID}')">Remove Widget</button>
 
-		
 	</div>
 </div>
