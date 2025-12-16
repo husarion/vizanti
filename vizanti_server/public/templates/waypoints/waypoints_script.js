@@ -23,6 +23,11 @@ let mode = "IDLE";
 let points = [];
 let shift_pressed = false;
 
+let gpsExportServiceDict = {};
+let gpsImportServiceDict = {};
+let selectedGpsExportService = "";
+let selectedGpsImportService = "";
+
 const icon_bar = document.getElementById("icon_bar");
 const icon = document.getElementById("{uniqueID}_icon");
 const dropdown = document.getElementById("{uniqueID}_dropdown");
@@ -38,6 +43,10 @@ const deleteButton = document.getElementById("{uniqueID}_delete");
 const exportButton = document.getElementById("{uniqueID}_export");
 const importButton = document.getElementById("{uniqueID}_import");
 const importInput = document.getElementById("{uniqueID}_import_input");
+const useGpsCoordinatesCheckbox = document.getElementById("{uniqueID}_use_gps_coordinates");
+const gpsServiceContainer = document.getElementById("{uniqueID}_gps_service_container");
+const gpsExportServiceBox = document.getElementById("{uniqueID}_gps_export_service");
+const gpsImportServiceBox = document.getElementById("{uniqueID}_gps_import_service");
 
 const missionSelect = document.getElementById("{uniqueID}_mission_select");
 const missionNameInput = document.getElementById("{uniqueID}_mission_name");
@@ -94,6 +103,26 @@ importInput.addEventListener('change', async (event) => {
 	}
 });
 
+useGpsCoordinatesCheckbox.addEventListener('change', () => {
+	if (useGpsCoordinatesCheckbox.checked) {
+		gpsServiceContainer.style.display = 'block';
+		loadGpsServices();
+	} else {
+		gpsServiceContainer.style.display = 'none';
+	}
+	saveSettings();
+});
+
+gpsExportServiceBox.addEventListener("change", (event) => {
+	selectedGpsExportService = gpsExportServiceBox.value;
+	saveSettings();
+});
+
+gpsImportServiceBox.addEventListener("change", (event) => {
+	selectedGpsImportService = gpsImportServiceBox.value;
+	saveSettings();
+});
+
 saveMissionButton.addEventListener('click', saveMission);
 loadMissionButton.addEventListener('click', loadMission);
 deleteMissionButton.addEventListener('click', deleteMission);
@@ -110,7 +139,7 @@ recordIntervalInput.addEventListener('change', () => {
 
 // File operations
 
-function exportMissionsToFile() {
+async function exportMissionsToFile() {
 	const missions = getSavedMissions();
 	const missionNames = Object.keys(missions);
 	
@@ -119,13 +148,41 @@ function exportMissionsToFile() {
 		return;
 	}
 
-	const exportData = {
+	const exportAsGps = useGpsCoordinatesCheckbox.checked;
+	let exportData = {
 		version: "1.0",
 		export_type: "missions",
+		coordinate_system: exportAsGps ? "gps" : "cartesian",
 		date: new Date().toISOString(),
-		missions: missions,
+		missions: {},
 		mission_count: missionNames.length
 	};
+
+	if (exportAsGps) {
+		status.setOK("Converting coordinates to GPS...");
+
+		const toLLService = new ROSLIB.Service({
+			ros: rosbridge.ros,
+			name: selectedGpsExportService,
+			serviceType: "robot_localization/srv/ToLL"
+		});
+
+		try {
+			for (const missionName of missionNames) {
+				const mission = missions[missionName];
+				const convertedMission = { ...mission };
+
+				convertedMission.waypoints = await convertWaypointsToGps(mission.waypoints, toLLService);
+				exportData.missions[missionName] = convertedMission;
+			}
+		} catch (error) {
+			console.error("Error converting to GPS coordinates:", error);
+			status.setError(`Failed to convert coordinates: ${error.message}`);
+			return;
+		}
+	} else {
+		exportData.missions = missions;
+	}
 
 	const jsonString = JSON.stringify(exportData, null, 2);
 	const blob = new Blob([jsonString], { type: 'application/json' });
@@ -139,7 +196,8 @@ function exportMissionsToFile() {
 	document.body.removeChild(downloadLink);
 	URL.revokeObjectURL(url);
 
-	status.setOK(`Exported ${missionNames.length} missions successfully`);
+	const coordTypeText = exportAsGps ? "GPS" : "cartesian";
+	status.setOK(`Exported ${missionNames.length} missions successfully as ${coordTypeText} coordinates`);
 }
 
 async function importMissionsFromFile(file) {
@@ -152,6 +210,7 @@ async function importMissionsFromFile(file) {
 			throw new Error("Invalid file format: not a missions export file");
 		}
 
+		const importAsGps = data.coordinate_system === "gps";
 		const importedMissions = data.missions;
 		const importedNames = Object.keys(importedMissions);
 		
@@ -176,15 +235,40 @@ async function importMissionsFromFile(file) {
 			}
 		}
 
+		let convertedMissions = { ...importedMissions };
+
+		if (importAsGps) {
+			status.setOK("Converting GPS coordinates to map coordinates...");
+
+			const fromLLArrayService = new ROSLIB.Service({
+				ros: rosbridge.ros,
+				name: selectedGpsImportService,
+				serviceType: "robot_localization/srv/FromLLArray"
+			});
+
+			try {
+				for (const missionName of importedNames) {
+					const mission = importedMissions[missionName];
+					const convertedMission = { ...mission };
+
+					convertedMission.waypoints = await convertGpsToWaypoints(mission.waypoints, fromLLArrayService);
+					convertedMissions[missionName] = convertedMission;
+				}
+			} catch (error) {
+				status.setError(`Failed to convert GPS coordinates: ${error.message}`);
+				return;
+			}
+		}
+
 		// Merge missions
-		const mergedMissions = { ...existingMissions, ...importedMissions };
-		
+		const mergedMissions = { ...existingMissions, ...convertedMissions };
+
 		const missionKey = getMissionKey();
 		settings[missionKey] = mergedMissions;
 		settings.save();
 
 		updateMissionSelect();
-		status.setOK(`Imported ${importedNames.length} missions successfully (${conflicts.length} overwritten)`);
+		status.setOK(`Imported ${importedNames.length} missions successfully with ${importAsGps ? "GPS" : "cartesian"} coordinates (${conflicts.length} overwritten)`);
 
 		// Clear the file input for next use
 		importInput.value = '';
@@ -193,6 +277,110 @@ async function importMissionsFromFile(file) {
 		console.error("Error importing missions:", error);
 		status.setError(`Failed to import missions: ${error.message}`);
 		importInput.value = '';
+	}
+}
+
+async function convertWaypointsToGps(waypoints, toLLService) {
+	const gpsWaypoints = [];
+
+	for (const waypoint of waypoints) {
+		const request = new ROSLIB.ServiceRequest({
+			map_point: {
+				x: waypoint.x,
+				y: waypoint.y,
+				z: waypoint.z
+			}
+		});
+
+		const result = await new Promise((resolve, reject) => {
+			toLLService.callService(request, resolve, reject);
+		});
+
+		gpsWaypoints.push({
+			index: waypoint.index,
+			latitude: result.ll_point.latitude,
+			longitude: result.ll_point.longitude,
+			altitude: result.ll_point.altitude
+		});
+	}
+
+	return gpsWaypoints;
+}
+
+async function convertGpsToWaypoints(gpsWaypoints, fromLLArrayService) {
+	const gpsPoints = gpsWaypoints.map(waypoint => ({
+		latitude: waypoint.latitude,
+		longitude: waypoint.longitude,
+		altitude: waypoint.altitude
+	}));
+
+	const request = new ROSLIB.ServiceRequest({
+		ll_points: gpsPoints
+	});
+
+	const result = await new Promise((resolve, reject) => {
+		fromLLArrayService.callService(request, resolve, reject);
+	});
+
+	// Convert result back to waypoint format
+	const mapWaypoints = result.map_points.map((mapPoint, index) => ({
+		index: index,
+		x: mapPoint.x,
+		y: mapPoint.y,
+		z: mapPoint.z
+	}));
+
+	return mapWaypoints;
+}
+
+async function loadGpsServices() {
+	try {
+		console.log("Loading GPS coordinate services...");
+		const toLLServices = await rosbridge.get_services("robot_localization/srv/ToLL");
+		const fromLLArrayServices = await rosbridge.get_services("robot_localization/srv/FromLLArray");
+
+		let exportServiceList = "";
+		let importServiceList = "";
+
+		// Add ToLL services (fallback for export)
+		toLLServices.forEach(service => {
+			exportServiceList += `<option value='${service}'>${service} (ToLL)</option>`;
+			gpsExportServiceDict[service] = "robot_localization/srv/ToLL";
+		});
+
+		// Add FromLLArray services (preferred for import)
+		fromLLArrayServices.forEach(service => {
+			importServiceList += `<option value='${service}'>${service} (FromLLArray)</option>`;
+			gpsImportServiceDict[service] = "robot_localization/srv/FromLLArray";
+		});
+
+		gpsExportServiceBox.innerHTML = exportServiceList;
+		gpsImportServiceBox.innerHTML = importServiceList;
+
+		if (exportServiceList === "") {
+			console.log(`No ToLL services found, defaulting to ${selectedGpsExportService}`);
+			gpsExportServiceBox.innerHTML = `<option value='${selectedGpsExportService}'>${selectedGpsExportService} (default)</option>`;
+		}
+		if (importServiceList === "") {
+			console.log(`No FromLLArray services found, defaulting to ${selectedGpsImportService}`);
+			gpsImportServiceBox.innerHTML = `<option value='${selectedGpsImportService}'>${selectedGpsImportService} (default)</option>`;
+		}
+
+		if (toLLServices.includes(selectedGpsExportService)) {
+			gpsExportServiceBox.value = selectedGpsExportService;
+		} else {
+			selectedGpsExportService = gpsExportServiceBox.value;
+		}
+
+		if (fromLLArrayServices.includes(selectedGpsImportService)) {
+			gpsImportServiceBox.value = selectedGpsImportService;
+		} else {
+			selectedGpsImportService = gpsImportServiceBox.value;
+		}
+
+	} catch (error) {
+		console.error("Error loading GPS services:", error);
+		status.setWarn("Failed to load GPS coordinate services");
 	}
 }
 
@@ -452,6 +640,17 @@ if(settings.hasOwnProperty("{uniqueID}")){
 	recordingInterval = loaded_data.recording_interval ?? 1.0;
 	recordIntervalInput.value = recordingInterval;
 
+	useGpsCoordinatesCheckbox.checked = loaded_data.use_gps_coordinates;
+
+	selectedGpsExportService = loaded_data.gps_export_service ?? "/toLL";
+	selectedGpsImportService = loaded_data.gps_import_service ?? "/fromLLArray";
+
+	// Show GPS service container if GPS coordinates are enabled
+	if (loaded_data.use_gps_coordinates) {
+		gpsServiceContainer.style.display = 'block';
+		loadGpsServices();
+	}
+
 	if(loaded_data.topic_type != undefined)
 		typedict[topic] = loaded_data.topic_type;
 
@@ -479,7 +678,10 @@ function saveSettings(){
 		points: points,
 		start_closest: startCheckbox.checked,
 		margin: margin.value,
-		recording_interval: recordingInterval
+		recording_interval: recordingInterval,
+		use_gps_coordinates: useGpsCoordinatesCheckbox.checked,
+		gps_export_service: selectedGpsExportService,
+		gps_import_service: selectedGpsImportService
 	}
 	settings.save();
 }
@@ -1405,6 +1607,11 @@ async function loadTopics(){
 		framelist += "<option value='"+fixed_frame+"'>"+fixed_frame+"</option>"
 		baseLinkFrameBox.innerHTML = framelist;
 		baseLinkFrameBox.value = base_link_frame;
+	}
+
+	// Load GPS services if checkbox is checked
+	if (useGpsCoordinatesCheckbox.checked) {
+		await loadGpsServices();
 	}
 }
 
