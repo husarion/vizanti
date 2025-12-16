@@ -643,7 +643,25 @@ function shouldRecordPoint(currentPosition, currentYaw) {
 		lastYaw = Math.atan2(lastPoint.y - secondToLastPoint.y, lastPoint.x - secondToLastPoint.x);
 	}
 
-	return distance >= recordMinThreshold && (distance >= recordMaxThreshold || Math.abs(lastYaw - currentYaw) >= recordAngleThreshold);
+	// Check angle between current position and last point to determine direction of movement
+	const positionYaw = Math.atan2(currentPosition.y - lastPoint.y, currentPosition.x - lastPoint.x);
+	const reversing = Math.abs(wrapAngle(positionYaw - currentYaw)) > Math.PI / 2;
+	if (reversing) {
+		lastYaw = lastYaw < 0 ? lastYaw + Math.PI : lastYaw - Math.PI;
+	}
+
+	const yawDiff = Math.abs(wrapAngle(lastYaw - currentYaw));
+	return distance >= recordMinThreshold && (distance >= recordMaxThreshold || yawDiff >= recordAngleThreshold);
+}
+
+function wrapAngle(angle) {
+	while (angle > Math.PI) {
+		angle -= 2 * Math.PI;
+	}
+	while (angle < -Math.PI) {
+		angle += 2 * Math.PI;
+	}
+	return angle;
 }
 
 // Settings
