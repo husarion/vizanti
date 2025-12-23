@@ -30,9 +30,22 @@
 
 		<p><strong>Record:</strong> Record positions automatically based on robot position.</p>
 
-		<label for="{uniqueID}_record_interval">Recording Interval (meters):</label>
-		<input type="number" id="{uniqueID}_record_interval" value="1.0" step="0.1" min="0.1" max="10" style="width: 80px;">
+		<label for="{uniqueID}_record_position_max_threshold">Recording Position Max Threshold (meters):</label>
+		<input type="number" id="{uniqueID}_record_position_max_threshold" value="5.0" step="0.1" min="0.1" max="10" style="width: 80px;">
+		<div class="spacer"></div>
 
+		<label for="{uniqueID}_record_position_min_threshold">Recording Position Min Threshold (meters):</label>
+		<input type="number" id="{uniqueID}_record_position_min_threshold" value="0.5" step="0.1" min="0.1" max="10" style="width: 80px;">
+		<div class="spacer"></div>
+
+		<label for="{uniqueID}_record_angle_threshold">Recording Position Angle Threshold (degrees):</label>
+		<input type="number" id="{uniqueID}_record_angle_threshold" value="30" step="1" min="0" max="180" style="width: 80px;">
+
+		<p style="color: #b4b4b4;">
+			The max distance the robot can diverge from the path being recorded is denoted by the following equation:
+			<br>
+			err = record_position_max_threshold * tan(record_angle_threshold)
+		</p>
 		<p style="color: #b4b4b4;">When recording positions, click the icon again to stop recording.</p>
 
 		<div class="spacer"></div>

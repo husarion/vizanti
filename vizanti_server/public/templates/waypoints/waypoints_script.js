@@ -54,11 +54,14 @@ const saveMissionButton = document.getElementById("{uniqueID}_save_mission");
 const loadMissionButton = document.getElementById("{uniqueID}_load_mission");
 const deleteMissionButton = document.getElementById("{uniqueID}_delete_mission");
 
-const recordIntervalInput = document.getElementById("{uniqueID}_record_interval");
+const recordMaxThresholdInput = document.getElementById("{uniqueID}_record_position_max_threshold");
+const recordMinThresholdInput = document.getElementById("{uniqueID}_record_position_min_threshold");
+const recordAngleThresholdInput = document.getElementById("{uniqueID}_record_angle_threshold");
 
 let isRecording = false;
-let lastRecordedPosition = null;
-let recordingInterval = 1.0;
+let recordMaxThreshold = 5.0;
+let recordMinThreshold = 0.5;
+let recordAngleThreshold = 0.52; // ~30 degrees in radians
 let recordingTimer = null;
 
 flipButton.addEventListener('click', ()=>{
@@ -132,8 +135,18 @@ missionSelect.addEventListener('change', () => {
 	missionNameInput.value = selectedMission;
 });
 
-recordIntervalInput.addEventListener('change', () => {
-	recordingInterval = parseFloat(recordIntervalInput.value);
+recordMaxThresholdInput.addEventListener('change', () => {
+	recordMaxThreshold = parseFloat(recordMaxThresholdInput.value);
+	saveSettings();
+});
+
+recordMinThresholdInput.addEventListener('change', () => {
+	recordMinThreshold = parseFloat(recordMinThresholdInput.value);
+	saveSettings();
+});
+
+recordAngleThresholdInput.addEventListener('change', () => {
+	recordAngleThreshold = parseFloat(recordAngleThresholdInput.value) * (Math.PI / 180);
 	saveSettings();
 });
 
@@ -552,16 +565,17 @@ function startPositionRecording() {
 		return;
 	}
 
-	recordingInterval = parseFloat(recordIntervalInput.value);
-	
+	recordMaxThreshold = parseFloat(recordMaxThresholdInput.value);
+	recordMinThreshold = parseFloat(recordMinThresholdInput.value);
+	recordAngleThreshold = parseFloat(recordAngleThresholdInput.value) * (Math.PI / 180);
+
 	isRecording = true;
-	lastRecordedPosition = null;
-	
+
 	// Start recording loop at 10Hz
 	recordingTimer = setInterval(() => {
 		recordCurrentPosition();
 	}, 100);
-	
+
 	status.setOK(`Started recording waypoints from ${base_link_frame} frame`);
 }
 
@@ -574,7 +588,6 @@ function stopPositionRecording() {
 	}
 
 	isRecording = false;
-	lastRecordedPosition = null;
 	
 	status.setOK("Stopped recording waypoints");
 	saveSettings();
@@ -592,17 +605,17 @@ function recordCurrentPosition() {
 		);
 
 		const currentPosition = robotTransform.translation;
+		const currentYaw = robotTransform.rotation.toEuler().h;
 
-		if (shouldRecordPoint(currentPosition)) {
+		if (shouldRecordPoint(currentPosition, currentYaw)) {
 			points.push({
 				x: currentPosition.x,
 				y: currentPosition.y,
 				z: currentPosition.z
 			});
 
-			lastRecordedPosition = currentPosition;
 			drawWaypoints();
-			
+
 			status.setOK(`Recording... ${points.length} waypoints`);
 		}
 
@@ -611,18 +624,44 @@ function recordCurrentPosition() {
 	}
 }
 
-function shouldRecordPoint(currentPosition) {
-	if (lastRecordedPosition === null) {
+function shouldRecordPoint(currentPosition, currentYaw) {
+	if (points.length === 0) {
 		return true;
 	}
 
+	const lastPoint = points[points.length - 1];
+
 	const distance = Math.sqrt(
-		Math.pow(currentPosition.x - lastRecordedPosition.x, 2) +
-		Math.pow(currentPosition.y - lastRecordedPosition.y, 2) +
-		Math.pow(currentPosition.z - lastRecordedPosition.z, 2)
+		Math.pow(currentPosition.x - lastPoint.x, 2) +
+		Math.pow(currentPosition.y - lastPoint.y, 2) +
+		Math.pow(currentPosition.z - lastPoint.z, 2)
 	);
 
-	return distance >= recordingInterval;
+	let lastYaw = 0;
+	if (points.length >= 2) {
+		const secondToLastPoint = points[points.length - 2];
+		lastYaw = Math.atan2(lastPoint.y - secondToLastPoint.y, lastPoint.x - secondToLastPoint.x);
+	}
+
+	// Check angle between current position and last point to determine direction of movement
+	const positionYaw = Math.atan2(currentPosition.y - lastPoint.y, currentPosition.x - lastPoint.x);
+	const reversing = Math.abs(wrapAngle(positionYaw - currentYaw)) > Math.PI / 2;
+	if (reversing) {
+		lastYaw = lastYaw < 0 ? lastYaw + Math.PI : lastYaw - Math.PI;
+	}
+
+	const yawDiff = Math.abs(wrapAngle(lastYaw - currentYaw));
+	return distance >= recordMinThreshold && (distance >= recordMaxThreshold || yawDiff >= recordAngleThreshold);
+}
+
+function wrapAngle(angle) {
+	while (angle > Math.PI) {
+		angle -= 2 * Math.PI;
+	}
+	while (angle < -Math.PI) {
+		angle += 2 * Math.PI;
+	}
+	return angle;
 }
 
 // Settings
@@ -637,8 +676,14 @@ if(settings.hasOwnProperty("{uniqueID}")){
 	margin.value = loaded_data.margin ?? 0.8;
 	startCheckbox.checked = loaded_data.start_closest;
 
-	recordingInterval = loaded_data.recording_interval ?? 1.0;
-	recordIntervalInput.value = recordingInterval;
+	recordMaxThreshold = loaded_data.record_position_max_threshold ?? 5.0;
+	recordMaxThresholdInput.value = recordMaxThreshold;
+
+	recordMinThreshold = loaded_data.record_position_min_threshold ?? 0.5;
+	recordMinThresholdInput.value = recordMinThreshold;
+
+	recordAngleThreshold = loaded_data.record_angle_threshold ?? 0.52;
+	recordAngleThresholdInput.value = Math.round(recordAngleThreshold * (180 / Math.PI));
 
 	useGpsCoordinatesCheckbox.checked = loaded_data.use_gps_coordinates;
 
@@ -678,7 +723,9 @@ function saveSettings(){
 		points: points,
 		start_closest: startCheckbox.checked,
 		margin: margin.value,
-		recording_interval: recordingInterval,
+		record_position_max_threshold: recordMaxThreshold,
+		record_position_min_threshold: recordMinThreshold,
+		record_angle_threshold: recordAngleThreshold,
 		use_gps_coordinates: useGpsCoordinatesCheckbox.checked,
 		gps_export_service: selectedGpsExportService,
 		gps_import_service: selectedGpsImportService
