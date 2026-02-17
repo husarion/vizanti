@@ -47,6 +47,7 @@ const nodenamebox = document.getElementById("{uniqueID}_nodename");
 const fixedFrameBox = document.getElementById("{uniqueID}_fixed_frame");
 
 const drop_start = document.getElementById("{uniqueID}_start");
+const drop_continue = document.getElementById("{uniqueID}_continue");
 const drop_stop = document.getElementById("{uniqueID}_stop");
 const drop_follow_me = document.getElementById("{uniqueID}_follow_me");
 const drop_mule = document.getElementById("{uniqueID}_mule");
@@ -85,7 +86,7 @@ function drawWaypoints() {
 function resizeScreen() {
 	canvas.height = window.innerHeight;
 	canvas.width = window.innerWidth;
-	drawWaypoints();
+	if (state === "MULE") drawWaypoints();
 }
 
 function clearPath() {
@@ -415,6 +416,8 @@ async function loadServices() {
 	if (typeof drop_follow_me !== "undefined" && drop_follow_me) drop_follow_me.style.display = foundServices.follow_me ? "block" : "none";
 	if (typeof drop_mule !== "undefined" && drop_mule) drop_mule.style.display = foundServices.mule ? "block" : "none";
 	if (typeof drop_exit !== "undefined" && drop_exit) drop_exit.style.display = foundServices.exit ? "block" : "none";
+	// Special case for mule
+	if (typeof drop_continue !== "undefined" && drop_continue) drop_continue.style.display = state === "MULE" ? "block" : "none";
 
 	//find frames
 	let framelist = "";
@@ -487,6 +490,16 @@ document.addEventListener("click", (event) => {
 drop_start.addEventListener("click", (event) => {
 	let found = Object.keys(typedict).find(k => k.endsWith("/start"));
 	if (found) callService(found);
+	dropdown_visibility(false);
+});
+
+drop_continue.addEventListener("click", (event) => {
+	const publisher = new ROSLIB.Topic({
+		ros: rosbridge.ros,
+		name: "mule/continue",
+		messageType: "std_msgs/msg/Empty",
+	});
+	publisher.publish(new ROSLIB.Message({}));
 	dropdown_visibility(false);
 });
 
