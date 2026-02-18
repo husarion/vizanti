@@ -440,7 +440,9 @@ subscribeCurrentState();
 function dropdown_visibility(open) {
 	if (open) {
 		loadServices();
-		dropdown.style.display = "block";
+		setTimeout(() => {
+			dropdown.style.display = "block";
+		}, 50);
 	} else {
 		dropdown.style.display = "none";
 	}
