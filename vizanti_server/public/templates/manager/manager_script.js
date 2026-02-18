@@ -28,7 +28,6 @@ let typedict = {};
 let fixed_frame = tf.fixed_frame;
 let mode = "IDLE";
 let state = "IDLE";
-let nodename = "navigation_manager";
 let points = [];
 
 let gpsImportServiceDict = {};
@@ -135,8 +134,6 @@ function subscribeCurrentState() {
 		}
 	});
 }
-
-subscribeCurrentState();
 
 async function loadGpsServices() {
 	try {
@@ -313,7 +310,7 @@ updateMissionSelect();
 
 if (settings.hasOwnProperty("{uniqueID}")) {
 	const loaded_data = settings["{uniqueID}"];
-	nodename = loaded_data.nodename;
+	nodenamebox.value = loaded_data.nodename ?? "navigation_manager";
 	points = loaded_data.points;
 	typedict = loaded_data.typedict ?? {};
 	fixed_frame = loaded_data.fixed_frame ?? tf.fixed_frame;
@@ -340,7 +337,7 @@ if (settings.hasOwnProperty("{uniqueID}")) {
 
 function saveSettings() {
 	settings["{uniqueID}"] = {
-		nodename: nodename,
+		nodename: nodenamebox.value,
 		typedict: typedict,
 		fixed_frame: fixed_frame,
 		points: points,
@@ -384,25 +381,24 @@ function callService(serviceName) {
 }
 
 async function loadServices() {
-	let triggersrvs = await rosbridge.get_services("std_srvs/srv/Trigger");
-	console.log(triggersrvs);
+	let triggerSrvs = await rosbridge.get_services("std_srvs/srv/Trigger");
+	console.log(triggerSrvs);
 
-	let serviceList = "";
 	let foundServices = {
 		start: false,
+		continue: false,
 		stop: false,
 		follow_me: false,
 		mule: false,
 		exit: false
 	};
 
-	triggersrvs.forEach(element => {
-		if (!element.includes("/vizanti/") && element.includes(nodenamebox.value)) {
-			serviceList += "<option value='" + element + "'>" + element + " (srvs/Trigger)</option>";
+	triggerSrvs.forEach(element => {
+		if (element.includes(nodenamebox.value)) {
 			typedict[element] = "std_srvs/srv/Trigger";
 
-			// Detect service types by name
 			if (element.endsWith("/start")) foundServices.start = true;
+			if (element.endsWith("/continue")) foundServices.continue = true;
 			if (element.endsWith("/stop")) foundServices.stop = true;
 			if (element.endsWith("/init_follow_me")) foundServices.follow_me = true;
 			if (element.endsWith("/init_mule")) foundServices.mule = true;
@@ -412,12 +408,11 @@ async function loadServices() {
 
 	// Show/hide dropdown elements based on found services
 	if (typeof drop_start !== "undefined" && drop_start) drop_start.style.display = foundServices.start ? "block" : "none";
+	if (typeof drop_continue !== "undefined" && drop_continue) drop_continue.style.display = foundServices.continue ? "block" : "none";
 	if (typeof drop_stop !== "undefined" && drop_stop) drop_stop.style.display = foundServices.stop ? "block" : "none";
 	if (typeof drop_follow_me !== "undefined" && drop_follow_me) drop_follow_me.style.display = foundServices.follow_me ? "block" : "none";
 	if (typeof drop_mule !== "undefined" && drop_mule) drop_mule.style.display = foundServices.mule ? "block" : "none";
 	if (typeof drop_exit !== "undefined" && drop_exit) drop_exit.style.display = foundServices.exit ? "block" : "none";
-	// Special case for mule
-	if (typeof drop_continue !== "undefined" && drop_continue) drop_continue.style.display = state === "MULE" ? "block" : "none";
 
 	//find frames
 	let framelist = "";
@@ -438,6 +433,7 @@ async function loadServices() {
 }
 
 loadServices();
+subscribeCurrentState();
 
 //dropdown stuff
 
@@ -483,8 +479,6 @@ document.addEventListener("click", (event) => {
 	if (!dropdown.contains(event.target) && !icon.contains(event.target)) {
 		dropdown_visibility(false);
 	}
-
-	saveSettings();
 });
 
 drop_start.addEventListener("click", (event) => {
@@ -494,12 +488,8 @@ drop_start.addEventListener("click", (event) => {
 });
 
 drop_continue.addEventListener("click", (event) => {
-	const publisher = new ROSLIB.Topic({
-		ros: rosbridge.ros,
-		name: "mule/continue",
-		messageType: "std_msgs/msg/Empty",
-	});
-	publisher.publish(new ROSLIB.Message({}));
+	let found = Object.keys(typedict).find(k => k.endsWith("/continue"));
+	if (found) callService(found);
 	dropdown_visibility(false);
 });
 
@@ -591,7 +581,7 @@ clearPathButton.addEventListener('click', async () => {
 });
 
 nodenamebox.addEventListener("change", (event) => {
-	nodename = nodenamebox.value;
+	subscribeCurrentState();
 	saveSettings();
 });
 
