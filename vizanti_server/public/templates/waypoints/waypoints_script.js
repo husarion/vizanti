@@ -3,6 +3,8 @@ let tfModule = await import(`${base_url}/js/modules/tf.js`);
 let rosbridgeModule = await import(`${base_url}/js/modules/rosbridge.js`);
 let persistentModule = await import(`${base_url}/js/modules/persistent.js`);
 let StatusModule = await import(`${base_url}/js/modules/status.js`);
+let missionUtils = await import(`${base_url}/js/modules/mission_utils.js`);
+let drawWaypointsModule = await import(`${base_url}/js/modules/draw_waypoints.js`);
 
 let view = viewModule.view;
 let tf = tfModule.tf;
@@ -64,13 +66,13 @@ let recordMinThreshold = 0.5;
 let recordAngleThreshold = 0.52; // ~30 degrees in radians
 let recordingTimer = null;
 
-flipButton.addEventListener('click', ()=>{
+flipButton.addEventListener('click', () => {
 	points.reverse();
 	drawWaypoints();
 	saveSettings();
 });
 
-zSetButton.addEventListener('click', async ()=>{
+zSetButton.addEventListener('click', async () => {
 	let zval = await prompt("Set the height of all points to this value:", "0");
 	if (zval != null) {
 		const newz = parseFloat(zval);
@@ -80,20 +82,27 @@ zSetButton.addEventListener('click', async ()=>{
 	}
 });
 
-deleteButton.addEventListener('click', async ()=>{
-	if(await confirm("Are you sure you want to delete all waypoints?")){
+deleteButton.addEventListener('click', async () => {
+	if (await confirm("Are you sure you want to delete all waypoints?")) {
 		points = [];
 		drawWaypoints();
 		saveSettings();
 	}
 });
 
-startCheckbox.addEventListener('change', ()=>{
+startCheckbox.addEventListener('change', () => {
 	drawWaypoints();
 	saveSettings();
 });
 
-exportButton.addEventListener('click', exportMissionsToFile);
+exportButton.addEventListener('click', () => {
+	try {
+		missionUtils.exportMissionsToFile(getSavedMissions(), useGpsCoordinatesCheckbox.checked, selectedGpsExportService);
+		status.setOK("Missions exported successfully");
+	} catch (error) {
+		status.setError(`Failed to export missions: ${error.message}`);
+	}
+});
 
 importButton.addEventListener('click', () => {
 	importInput.click();
@@ -102,7 +111,20 @@ importButton.addEventListener('click', () => {
 importInput.addEventListener('change', async (event) => {
 	const file = event.target.files[0];
 	if (file) {
-		await importMissionsFromFile(file);
+		try {
+			const convertedMissions = await missionUtils.importMissionsFromFile(file, getSavedMissions(), useGpsCoordinatesCheckbox.checked, selectedGpsImportService);
+
+			const missionKey = getMissionKey();
+			settings[missionKey] = convertedMissions;
+			settings.save();
+
+			updateMissionSelect();
+
+			status.setOK("Missions imported successfully");
+		} catch (error) {
+			status.setError(`Failed to import missions: ${error.message}`);
+			importInput.value = '';
+		}
 	}
 });
 
@@ -150,200 +172,22 @@ recordAngleThresholdInput.addEventListener('change', () => {
 	saveSettings();
 });
 
-// File operations
-
-async function exportMissionsToFile() {
-	const missions = getSavedMissions();
-	const missionNames = Object.keys(missions);
-	
-	if (missionNames.length === 0) {
-		status.setWarn("No saved missions to export");
-		return;
-	}
-
-	const exportAsGps = useGpsCoordinatesCheckbox.checked;
-	let exportData = {
-		version: "1.0",
-		export_type: "missions",
-		coordinate_system: exportAsGps ? "gps" : "cartesian",
-		date: new Date().toISOString(),
-		missions: {},
-		mission_count: missionNames.length
-	};
-
-	if (exportAsGps) {
-		status.setOK("Converting coordinates to GPS...");
-
-		const toLLService = new ROSLIB.Service({
-			ros: rosbridge.ros,
-			name: selectedGpsExportService,
-			serviceType: "robot_localization/srv/ToLL"
-		});
-
-		try {
-			for (const missionName of missionNames) {
-				const mission = missions[missionName];
-				const convertedMission = { ...mission };
-
-				convertedMission.waypoints = await convertWaypointsToGps(mission.waypoints, toLLService);
-				exportData.missions[missionName] = convertedMission;
-			}
-		} catch (error) {
-			console.error("Error converting to GPS coordinates:", error);
-			status.setError(`Failed to convert coordinates: ${error.message}`);
-			return;
-		}
-	} else {
-		exportData.missions = missions;
-	}
-
-	const jsonString = JSON.stringify(exportData, null, 2);
-	const blob = new Blob([jsonString], { type: 'application/json' });
-	const url = URL.createObjectURL(blob);
-	
-	const downloadLink = document.createElement('a');
-	downloadLink.href = url;
-	downloadLink.download = `waypoint_missions_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
-	document.body.appendChild(downloadLink);
-	downloadLink.click();
-	document.body.removeChild(downloadLink);
-	URL.revokeObjectURL(url);
-
-	const coordTypeText = exportAsGps ? "GPS" : "cartesian";
-	status.setOK(`Exported ${missionNames.length} missions successfully as ${coordTypeText} coordinates`);
-}
-
-async function importMissionsFromFile(file) {
-	try {
-		const text = await file.text();
-		const data = JSON.parse(text);
-
-		// Check if this is a missions export file
-		if (data.export_type !== "missions" || !data.missions) {
-			throw new Error("Invalid file format: not a missions export file");
-		}
-
-		const importAsGps = data.coordinate_system === "gps";
-		const importedMissions = data.missions;
-		const importedNames = Object.keys(importedMissions);
-		
-		if (importedNames.length === 0) {
-			status.setWarn("No missions found in the file");
-			return;
-		}
-
-		const existingMissions = getSavedMissions();
-		const existingNames = Object.keys(existingMissions);
-		
-		// Check for name conflicts
-		const conflicts = importedNames.filter(name => existingNames.includes(name));
-		
-		if (conflicts.length > 0) {
-			const overwrite = await confirm(
-				`The following missions already exist and will be overwritten:\n${conflicts.join(', ')}\n\nDo you want to continue?`
-			);
-			if (!overwrite) {
-				status.setWarn("Import cancelled by user");
-				return;
-			}
-		}
-
-		let convertedMissions = { ...importedMissions };
-
-		if (importAsGps) {
-			status.setOK("Converting GPS coordinates to map coordinates...");
-
-			const fromLLArrayService = new ROSLIB.Service({
-				ros: rosbridge.ros,
-				name: selectedGpsImportService,
-				serviceType: "robot_localization/srv/FromLLArray"
-			});
-
-			try {
-				for (const missionName of importedNames) {
-					const mission = importedMissions[missionName];
-					const convertedMission = { ...mission };
-
-					convertedMission.waypoints = await convertGpsToWaypoints(mission.waypoints, fromLLArrayService);
-					convertedMissions[missionName] = convertedMission;
-				}
-			} catch (error) {
-				status.setError(`Failed to convert GPS coordinates: ${error.message}`);
-				return;
-			}
-		}
-
-		// Merge missions
-		const mergedMissions = { ...existingMissions, ...convertedMissions };
-
-		const missionKey = getMissionKey();
-		settings[missionKey] = mergedMissions;
-		settings.save();
-
-		updateMissionSelect();
-		status.setOK(`Imported ${importedNames.length} missions successfully with ${importAsGps ? "GPS" : "cartesian"} coordinates (${conflicts.length} overwritten)`);
-
-		// Clear the file input for next use
-		importInput.value = '';
-
+function drawWaypoints() {
+	try{
+		drawWaypointsModule.drawWaypoints(canvas, ctx, view, points, tf, fixed_frame, mode, margin.value, getStartIndex());
+		status.setOK();
 	} catch (error) {
-		console.error("Error importing missions:", error);
-		status.setError(`Failed to import missions: ${error.message}`);
-		importInput.value = '';
+		console.error("Error drawing waypoints:", error);
+		status.setError(`Failed to draw waypoints: ${error.message}`);
 	}
 }
 
-async function convertWaypointsToGps(waypoints, toLLService) {
-	const gpsWaypoints = [];
-
-	for (const waypoint of waypoints) {
-		const request = new ROSLIB.ServiceRequest({
-			map_point: {
-				x: waypoint.x,
-				y: waypoint.y,
-				z: waypoint.z
-			}
-		});
-
-		const result = await new Promise((resolve, reject) => {
-			toLLService.callService(request, resolve, reject);
-		});
-
-		gpsWaypoints.push({
-			index: waypoint.index,
-			latitude: result.ll_point.latitude,
-			longitude: result.ll_point.longitude,
-			altitude: result.ll_point.altitude
-		});
-	}
-
-	return gpsWaypoints;
+function pointToScreen(point) {
+	return drawWaypointsModule.pointToScreen(point, view, tf, fixed_frame);
 }
 
-async function convertGpsToWaypoints(gpsWaypoints, fromLLArrayService) {
-	const gpsPoints = gpsWaypoints.map(waypoint => ({
-		latitude: waypoint.latitude,
-		longitude: waypoint.longitude,
-		altitude: waypoint.altitude
-	}));
-
-	const request = new ROSLIB.ServiceRequest({
-		ll_points: gpsPoints
-	});
-
-	const result = await new Promise((resolve, reject) => {
-		fromLLArrayService.callService(request, resolve, reject);
-	});
-
-	// Convert result back to waypoint format
-	const mapWaypoints = result.map_points.map((mapPoint, index) => ({
-		index: index,
-		x: mapPoint.x,
-		y: mapPoint.y,
-		z: mapPoint.z
-	}));
-
-	return mapWaypoints;
+function screenToPoint(click) {
+	return drawWaypointsModule.screenToPoint(click, view, tf, fixed_frame);
 }
 
 async function loadGpsServices() {
@@ -449,7 +293,7 @@ function saveMission() {
 	};
 
 	missions[missionName] = missionData;
-	
+
 	const missionKey = getMissionKey();
 	settings[missionKey] = missions;
 	settings.save();
@@ -468,7 +312,7 @@ async function loadMission() {
 
 	const missions = getSavedMissions();
 	const missionData = missions[selectedMission];
-	
+
 	if (!missionData) {
 		status.setError("Mission not found");
 		return;
@@ -529,7 +373,7 @@ async function deleteMission() {
 
 	const missions = getSavedMissions();
 	delete missions[selectedMission];
-	
+
 	const missionKey = getMissionKey();
 	settings[missionKey] = missions;
 	settings.save();
@@ -542,7 +386,7 @@ async function deleteMission() {
 function updateMissionSelect() {
 	const missions = getSavedMissions();
 	const missionNames = Object.keys(missions).sort();
-	
+
 	let optionsHtml = '<option value="">-- Select Mission --</option>';
 	missionNames.forEach(name => {
 		const mission = missions[name];
@@ -550,7 +394,7 @@ function updateMissionSelect() {
 		const date = new Date(mission.date).toLocaleDateString();
 		optionsHtml += `<option value="${name}">${name} (${waypointCount} points, ${date})</option>`;
 	});
-	
+
 	missionSelect.innerHTML = optionsHtml;
 }
 
@@ -588,7 +432,7 @@ function stopPositionRecording() {
 	}
 
 	isRecording = false;
-	
+
 	status.setOK("Stopped recording waypoints");
 	saveSettings();
 }
@@ -666,8 +510,8 @@ function wrapAngle(angle) {
 
 // Settings
 
-if(settings.hasOwnProperty("{uniqueID}")){
-	const loaded_data  = settings["{uniqueID}"];
+if (settings.hasOwnProperty("{uniqueID}")) {
+	const loaded_data = settings["{uniqueID}"];
 	topic = loaded_data.topic;
 	points = loaded_data.points;
 	fixed_frame = loaded_data.fixed_frame ?? tf.fixed_frame;
@@ -696,7 +540,7 @@ if(settings.hasOwnProperty("{uniqueID}")){
 		loadGpsServices();
 	}
 
-	if(loaded_data.topic_type != undefined)
+	if (loaded_data.topic_type != undefined)
 		typedict[topic] = loaded_data.topic_type;
 
 	for (let i = 0; i < points.length; i++) {
@@ -704,17 +548,17 @@ if(settings.hasOwnProperty("{uniqueID}")){
 			points[i].z = 0;
 	}
 
-}else{
+} else {
 	saveSettings();
 }
 
-if(topic == ""){
+if (topic == "") {
 	topic = "/waypoints";
 	status.setWarn("No topic found, defaulting to /waypoints");
 	saveSettings();
 }
 
-function saveSettings(){
+function saveSettings() {
 	settings["{uniqueID}"] = {
 		topic: topic,
 		topic_type: typedict[topic],
@@ -735,7 +579,7 @@ function saveSettings(){
 
 // Message sending
 
-function getStamp(){
+function getStamp() {
 	const currentTime = new Date();
 	const currentTimeSecs = Math.floor(currentTime.getTime() / 1000);
 	const currentTimeNsecs = (currentTime.getTime() % 1000) * 1e6;
@@ -746,7 +590,7 @@ function getStamp(){
 	}
 }
 
-function getPoseStamped(index, timeStamp, x, y, z, quat){
+function getPoseStamped(index, timeStamp, x, y, z, quat) {
 	return new ROSLIB.Message({
 		header: {
 			stamp: timeStamp,
@@ -763,7 +607,7 @@ function getPoseStamped(index, timeStamp, x, y, z, quat){
 	});
 }
 
-function getPose(x, y, z, quat){
+function getPose(x, y, z, quat) {
 	return new ROSLIB.Message({
 		position: {
 			x: x,
@@ -774,37 +618,36 @@ function getPose(x, y, z, quat){
 	});
 }
 
-function sendMessage(pointlist){
+function sendMessage(pointlist) {
 	let timeStamp = getStamp();
 	let poseList = [];
 	let stamped = typedict[topic] == "nav_msgs/msg/Path";
 
-	if(pointlist.length > 0)
-	{
-		if(pointlist.length  == 1){
-			if(stamped){
+	if (pointlist.length > 0) {
+		if (pointlist.length == 1) {
+			if (stamped) {
 				poseList.push(getPoseStamped(0, timeStamp, pointlist[0].x, pointlist[0].y, pointlist[0].z, new Quaternion()));
-			}else{
+			} else {
 				poseList.push(getPose(pointlist[0].x, pointlist[0].y, pointlist[0].z, new Quaternion()));
 			}
-		}else{
+		} else {
 			pointlist.forEach((point, index) => {
 				let p0;
 				let p1;
 
-				if(index < pointlist.length-1){
+				if (index < pointlist.length - 1) {
 					p0 = point;
-					p1 = pointlist[index+1];
-				}else{
-					p0 = pointlist[index-1];
+					p1 = pointlist[index + 1];
+				} else {
+					p0 = pointlist[index - 1];
 					p1 = point;
 				}
 
 				const rotation = Quaternion.fromEuler(Math.atan2(p1.y - p0.y, p1.x - p0.x), 0, 0, 'ZXY');
 
-				if(stamped){
+				if (stamped) {
 					poseList.push(getPoseStamped(index, timeStamp, point.x, point.y, point.z, rotation));
-				}else{
+				} else {
 					poseList.push(getPose(point.x, point.y, point.z, rotation));
 				}
 			});
@@ -825,7 +668,7 @@ function sendMessage(pointlist){
 		},
 		poses: poseList
 	});
-	
+
 	publisher.publish(pathMessage);
 	status.setOK();
 
@@ -838,396 +681,45 @@ const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
 
 const view_container = document.getElementById("view_container");
 
-function getStartIndex(){
+function getStartIndex() {
 
-	if(base_link_frame == ""){
+	if (base_link_frame == "") {
 		status.setError("Base link frame not selected or the TF data is missing.");
 		return 0;
 	}
 
 	let link = tf.transformPose(
-		base_link_frame, 
-		fixed_frame, 
-		{x: 0, y: 0, z: 0}, 
+		base_link_frame,
+		fixed_frame,
+		{ x: 0, y: 0, z: 0 },
 		new Quaternion()
 	);
 
-    let minDistance = Number.POSITIVE_INFINITY;
-    let minIndex = 0;
+	let minDistance = Number.POSITIVE_INFINITY;
+	let minIndex = 0;
 
-    for (let i = 0; i < points.length; i++) {
-        let distance = 0;
+	for (let i = 0; i < points.length; i++) {
+		let distance = 0;
 
 		distance += Math.pow((link.translation.x - points[i].x), 2);
 		distance += Math.pow((link.translation.y - points[i].y), 2);
 		distance += Math.pow((link.translation.z - points[i].z), 2);
 
-        if (distance < minDistance) {
-            minDistance = distance;
-            minIndex = i;
-        }
-    }
-    return minIndex;
-}
-
-function pointToScreen(point){
-	let transformed = tf.transformPose(
-		fixed_frame, 
-		tf.fixed_frame, 
-		point, 
-		new Quaternion()
-	);
-
-	return view.fixedToScreen({
-		x: transformed.translation.x,
-		y: transformed.translation.y
-	});
-}
-
-function screenToPoint(click){
-	return tf.transformPose(
-		tf.fixed_frame, 
-		fixed_frame, 
-		view.screenToFixed(click), 
-		new Quaternion()
-	).translation;
-}
-
-function drawOffsetPath(viewPoints, offset, startIndex) {
-	ctx.lineWidth = offset;
-	ctx.strokeStyle = "rgba(20,20,20,0.35)";
-	ctx.lineCap = "round";
-
-	ctx.beginPath();
-	for (let i = 0; i < viewPoints.length - 1; i++) {
-
-		if(startCheckbox.checked && i < startIndex)
-			continue;
-
-        const p1 = viewPoints[i];
-        const p2 = viewPoints[i + 1];
-
-		ctx.moveTo(p1.x, p1.y);
-		ctx.lineTo(p2.x, p2.y);
+		if (distance < minDistance) {
+			minDistance = distance;
+			minIndex = i;
+		}
 	}
-
-	ctx.stroke();
+	return minIndex;
 }
 
 const LIGHT_YELLOW = [255, 248, 199];
-const PURE_YELLOW =  [235, 206, 0];
+const PURE_YELLOW = [235, 206, 0];
 const DARK_YELLOW = [54, 47, 0];
 
 const LIGHT_BLUE = [181, 209, 255];
 const PURE_BLUE = [105, 162, 255];
 const DARK_BLUE = [0, 25, 69];
-
-function drawWaypoints() {
-
-	const active = mode != "IDLE";
-    const wid = canvas.width;
-    const hei = canvas.height;
-
-    ctx.clearRect(0, 0, wid, hei);
-
-	const frame = tf.absoluteTransforms[fixed_frame];
-	if(!frame){
-		status.setError("Fixed transform frame not selected or the TF data is missing.");
-		return;
-	}
-
-	const color = mode != "Z" ? "#EBCE00" : "#abcbff";
-	const OUTLINE_PX = mode != "Z" ? 13 : 18;
-	const INNER_PX = mode != "Z" ? 10 : 15;
-
-	const startIndex = getStartIndex();
-	const viewPoints = points.map((point) =>
-		pointToScreen(point)
-	);
-
-	if(margin.value > 0){
-		drawOffsetPath(viewPoints, margin.value * view.getMapUnitsInPixels(1.0), startIndex);
-	}
-
-	ctx.lineWidth = 3;
-	ctx.fillStyle = active ? "white" : color
-	if(startCheckbox.checked)
-		ctx.strokeStyle = "#4a4a4a";
-	else
-		ctx.strokeStyle = color;
-
-	const minZ = Math.min(...points.map(p => p.z));
-	const maxZ = Math.max(...points.map(p => p.z));
-
-	//draw path gradients
-	if(minZ != maxZ)
-	{
-		function scale_color(x, y, z, scale){
-			let r = y[0];
-			let g = y[1];
-			let b = y[2];
-			if(scale < 0.5){
-				scale = scale*2;
-				const scaleinv = 1.0 - scale;
-				r = scaleinv*x[0] + scale*r;
-				g = scaleinv*x[1] + scale*g;
-				b = scaleinv*x[2] + scale*b;
-			}else if(scale > 0.5){
-				scale = (scale-0.5)*2;
-				const scaleinv = 1.0 - scale;
-				r = scale*z[0] + scaleinv*r;
-				g = scale*z[1] + scaleinv*g;
-				b = scale*z[2]+ scaleinv*b;
-			}
-			return `rgba(${r},${g},${b},1.0)`;
-		}
-
-		for (let i = 0; i < viewPoints.length-1; i++) {
-			const pos = viewPoints[i];
-			const next = viewPoints[i+1];
-
-			const grad = ctx.createLinearGradient(pos.x, pos.y, next.x, next.y)
-			const start_scale = (points[i].z - minZ) / (maxZ - minZ);
-			const end_scale = (points[i+1].z - minZ) / (maxZ - minZ);
-			const mid_scale = (start_scale + end_scale) * 0.5;
-
-			if(mode != "Z"){
-				grad.addColorStop(0.0, scale_color(DARK_YELLOW, PURE_YELLOW, LIGHT_YELLOW, start_scale));
-				grad.addColorStop(0.5, scale_color(DARK_YELLOW, PURE_YELLOW, LIGHT_YELLOW, mid_scale));
-				grad.addColorStop(1.0, scale_color(DARK_YELLOW, PURE_YELLOW, LIGHT_YELLOW, end_scale));
-			}else{//blue
-				grad.addColorStop(0.0, scale_color(DARK_BLUE, PURE_BLUE, LIGHT_BLUE, start_scale));
-				grad.addColorStop(0.5, scale_color(DARK_BLUE, PURE_BLUE, LIGHT_BLUE, mid_scale));
-				grad.addColorStop(1.0, scale_color(DARK_BLUE, PURE_BLUE, LIGHT_BLUE, end_scale));
-			}
-
-			if(startCheckbox.checked && i < startIndex){
-				ctx.strokeStyle = "#545454";
-			}else{
-				ctx.strokeStyle = grad;
-			}
-				
-			ctx.beginPath();
-			ctx.moveTo(pos.x, pos.y);
-			ctx.lineTo(next.x, next.y);
-			ctx.stroke();
-		}
-		
-	}
-	else //draw monocolour path
-	{
-		ctx.beginPath();
-		for (let i = 0; i < viewPoints.length; i++) {
-			const pos = viewPoints[i];
-	
-			if(i == startIndex && startCheckbox.checked){
-				ctx.lineTo(pos.x, pos.y);
-				ctx.stroke();
-				ctx.strokeStyle = color; 
-				ctx.beginPath();
-			}
-	
-			if (i === 0) {
-				ctx.moveTo(pos.x, pos.y);
-			} else {
-				ctx.lineTo(pos.x, pos.y);
-			}
-		};
-		ctx.stroke();
-	}
-
-	function drawCircles(){
-		//circle outlines
-		ctx.fillStyle = "#292929";
-		ctx.beginPath();
-		for (let i = 0; i < viewPoints.length; i++) {
-			const pos = viewPoints[i];
-			ctx.moveTo(pos.x+OUTLINE_PX, pos.y);
-			ctx.arc(pos.x, pos.y, OUTLINE_PX, 0, 2 * Math.PI, false);
-		};
-		ctx.fill();
-
-		//circle middle
-		if(startCheckbox.checked)
-		{
-			ctx.fillStyle = active ? "white" : "#827c52";
-			ctx.beginPath();
-			for (let i = 0; i < startIndex; i++) {
-				const pos = viewPoints[i];
-				ctx.moveTo(pos.x+INNER_PX, pos.y);
-				ctx.arc(pos.x, pos.y, INNER_PX, 0, 2 * Math.PI, false);
-			}
-			ctx.fill();
-
-			ctx.fillStyle = active ? "white" : color;
-			ctx.beginPath();
-			for (let i = startIndex; i < viewPoints.length; i++) {
-				const pos = viewPoints[i];
-				ctx.moveTo(pos.x+INNER_PX, pos.y);
-				ctx.arc(pos.x, pos.y, INNER_PX, 0, 2 * Math.PI, false);
-			}
-			ctx.fill();
-		}
-		else
-		{
-			ctx.fillStyle = active ? "white" : color;
-			ctx.beginPath();
-			for (let i = 0; i < viewPoints.length; i++) {
-				const pos = viewPoints[i];
-				ctx.moveTo(pos.x+INNER_PX, pos.y);
-				ctx.arc(pos.x, pos.y, INNER_PX, 0, 2 * Math.PI, false);
-			}
-			ctx.fill();
-		}
-	}
-
-	function drawRectangles(){
-
-		function traceRect(pos, width, height){
-			const x = pos.x - width/2;
-			const y = pos.y - height/2;
-			ctx.moveTo(x, y);
-			ctx.lineTo(x + width, y);
-			ctx.lineTo(x + width, y + height);
-			ctx.lineTo(x, y + height);
-			ctx.lineTo(x, y);
-		}
-
-		const BORDER_PX = (OUTLINE_PX - INNER_PX) * 2;
-
-		//rect outlines
-		ctx.lineWidth = 1;
-		ctx.fillStyle = "#292929";
-		ctx.beginPath();
-		for (let i = 0; i < viewPoints.length; i++) {
-			traceRect(viewPoints[i], INNER_PX*3.5+BORDER_PX, INNER_PX*1.3+BORDER_PX);
-		}
-		ctx.fill();
-
-		//rect middle
-		ctx.fillStyle = active ? "white" : color;
-		ctx.beginPath();
-		for (let i = 0; i < viewPoints.length; i++) {
-			traceRect(viewPoints[i], INNER_PX*3.5, INNER_PX*1.3);
-		}
-		ctx.fill();
-
-		//draw depth scale
-		if(drag_point >= 0){
-			const p = viewPoints[drag_point];
-
-			const grad = ctx.createLinearGradient(p.x-60, p.y, p.x+25, p.y)
-			grad.addColorStop(0.0, "rgba(0, 0, 0, 0.75)");
-			grad.addColorStop(1.0, "transparent");
-			ctx.fillStyle = grad;
-			ctx.fillRect(p.x-60, icon_bar.offsetHeight, 85, window.innerHeight-icon_bar.offsetHeight)
-
-			ctx.lineWidth = 2;
-			ctx.strokeStyle = "white";
-			ctx.beginPath();
-
-			//0
-			ctx.moveTo(p.x-60, p.y);
-			ctx.lineTo(p.x-30, p.y);
-
-			const steps = [1, 10, 100, 1000, 10000]
-			for(const i of steps){
-				const scaled = stepToLinearScale(i) / 1.25;
-				ctx.moveTo(p.x-60, p.y+scaled);
-				ctx.lineTo(p.x, p.y+scaled);
-
-				ctx.moveTo(p.x-60, p.y-scaled);
-				ctx.lineTo(p.x, p.y-scaled);
-			}
-			ctx.stroke();
-
-			ctx.lineJoin = 'round';
-			ctx.miterLimit = 2;
-			ctx.font = (12)+"px Monospace";
-			ctx.textAlign = "left";
-			ctx.fillStyle = "white";
-
-			for(const i of steps){
-				const scaled = stepToLinearScale(i) / 1.25;
-
-				const text = Math.round(drag_point_z+i).toFixed(0);
-				const text_neg = Math.round(drag_point_z-i).toFixed(0);
-
-				ctx.fillText(text_neg, p.x-25, p.y+scaled-5);
-				ctx.fillText(text, p.x-25, p.y-scaled-5);
-			}
-
-			ctx.lineWidth = 1;
-			ctx.strokeStyle = "lightgray";
-			ctx.beginPath();
-			const micro_steps = [
-				0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,
-				1, 2, 3, 4, 5, 6, 7, 8, 9,
-				10, 20, 30, 40, 50, 60, 70, 80, 90, 
-				100, 200, 300, 400, 500, 600, 700, 800, 900,
-				1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000
-			]
-
-			for(const i of micro_steps){
-				const scaled = stepToLinearScale(i) / 1.25;
-				ctx.moveTo(p.x-60, p.y+scaled);
-				ctx.lineTo(p.x-30, p.y+scaled);
-
-				ctx.moveTo(p.x-60, p.y-scaled);
-				ctx.lineTo(p.x-30, p.y-scaled);
-			}
-
-			ctx.stroke();
-
-			ctx.lineWidth = 5;
-			ctx.strokeStyle = "#446294";
-			ctx.beginPath();
-			ctx.moveTo(p.x-60, icon_bar.offsetHeight);
-			ctx.lineTo(p.x-60, window.innerHeight);
-
-			//up arrow
-			ctx.moveTo(p.x-65, icon_bar.offsetHeight+10);
-			ctx.lineTo(p.x-60, icon_bar.offsetHeight);
-			ctx.lineTo(p.x-55, icon_bar.offsetHeight+10);
-
-			//down arrow
-			ctx.moveTo(p.x-65, window.innerHeight-10);
-			ctx.lineTo(p.x-60, window.innerHeight);
-			ctx.lineTo(p.x-55, window.innerHeight-10);
-			ctx.stroke();
-		}
-		
-	}
-
-	if(mode == "Z")
-		drawRectangles();
-	else
-		drawCircles();
-
-	ctx.font = "bold 12px Monospace";
-	ctx.textAlign = "center";
-	ctx.fillStyle = "#21252b";
-
-	function formatZ(num) {
-		if(num > 0){
-			if (num >= 10000) return "9999";
-			if (num >= 100) return Math.floor(num).toString();
-			return num.toFixed(1);
-		}
-		const absnum = Math.abs(num);
-		if (absnum >= 10000) return "-9999";
-		if (absnum >= 100) return Math.floor(num).toString();
-		return num.toFixed(1);
-	}
-	viewPoints.forEach((pos, index) => {
-		if(mode == "Z")
-			ctx.fillText(formatZ(points[index].z)+"m", pos.x, pos.y+5);
-		else
-			ctx.fillText(index, pos.x, pos.y+5);
-	});
-
-	status.setOK();
-}
 
 let start_stamp = undefined;
 let start_point = undefined;
@@ -1235,7 +727,7 @@ let delta = undefined;
 let drag_point = -1;
 let drag_point_z = 0;
 
-function findPoint(newpoint){
+function findPoint(newpoint) {
 	let i = -1;
 	points.forEach((point, index) => {
 		const screenpoint = pointToScreen(point);
@@ -1243,9 +735,9 @@ function findPoint(newpoint){
 			screenpoint.x - newpoint.x,
 			screenpoint.y - newpoint.y,
 		)
-		if(mode == "XY" && dist < 15){
+		if (mode == "XY" && dist < 15) {
 			i = index;
-		}else if(mode == "Z" && dist < 20){
+		} else if (mode == "Z" && dist < 20) {
 			i = index;
 		}
 	});
@@ -1255,45 +747,45 @@ function findPoint(newpoint){
 const Z_SCALE_MULT = 170;
 
 function stepToLinearScale(x) {
-    const absX = Math.abs(x);
-    let result;
-    if (absX <= 1) {
-        result = absX;
-    } else if (absX <= 10) {
-        result = 1 + (absX - 1) / 9;
-    } else if (absX <= 100) {
-        result = 2 + (absX - 10) / 90;
-    } else if (absX <= 1000) {
-        result = 3 + (absX - 100) / 900;
-    } else if (absX <= 10000) {
-        result = 4 + (absX - 1000) / 9000;
-    } else {
-        result = 5;
-    }
-    return result * Math.sign(x) * Z_SCALE_MULT;
+	const absX = Math.abs(x);
+	let result;
+	if (absX <= 1) {
+		result = absX;
+	} else if (absX <= 10) {
+		result = 1 + (absX - 1) / 9;
+	} else if (absX <= 100) {
+		result = 2 + (absX - 10) / 90;
+	} else if (absX <= 1000) {
+		result = 3 + (absX - 100) / 900;
+	} else if (absX <= 10000) {
+		result = 4 + (absX - 1000) / 9000;
+	} else {
+		result = 5;
+	}
+	return result * Math.sign(x) * Z_SCALE_MULT;
 }
 
 function linearToStepScale(y) {
-	y/=Z_SCALE_MULT;
-    const absY = Math.abs(y);
-    let result;
-    if (absY <= 1) {
-        result = absY;
-    } else if (absY <= 2) {
-        result = 1 + (absY - 1) * 9;
-    } else if (absY <= 3) {
-        result = 10 + (absY - 2) * 90;
-    } else if (absY <= 4) {
-        result = 100 + (absY - 3) * 900;
+	y /= Z_SCALE_MULT;
+	const absY = Math.abs(y);
+	let result;
+	if (absY <= 1) {
+		result = absY;
+	} else if (absY <= 2) {
+		result = 1 + (absY - 1) * 9;
+	} else if (absY <= 3) {
+		result = 10 + (absY - 2) * 90;
+	} else if (absY <= 4) {
+		result = 100 + (absY - 3) * 900;
 	} else if (absY <= 5) {
-        result = 1000 + (absY - 4) * 9000;
-	}else{
+		result = 1000 + (absY - 4) * 9000;
+	} else {
 		result = 10000;
 	}
-    return result * Math.sign(y);
+	return result * Math.sign(y);
 }
 
-function startDrag(event){
+function startDrag(event) {
 	const { clientX, clientY } = event.touches ? event.touches[0] : event;
 	start_point = {
 		x: clientX,
@@ -1301,7 +793,7 @@ function startDrag(event){
 	};
 
 	drag_point = findPoint(start_point);
-	if(drag_point >= 0){
+	if (drag_point >= 0) {
 		view.setInputMovementEnabled(false);
 		drag_point_z = points[drag_point].z;
 	}
@@ -1309,28 +801,28 @@ function startDrag(event){
 	start_stamp = new Date();
 }
 
-function drag(event){
+function drag(event) {
 	let { clientX, clientY } = event.touches ? event.touches[0] : event;
 
-	if(shift_pressed){
-		clientX = Math.round(clientX/20) * 20;
-		clientY = Math.round(clientY/20) * 20;
+	if (shift_pressed) {
+		clientX = Math.round(clientX / 20) * 20;
+		clientY = Math.round(clientY / 20) * 20;
 	}
 
-	if(mode == "XY"){
-		if(drag_point >= 0){
+	if (mode == "XY") {
+		if (drag_point >= 0) {
 			const newpos = screenToPoint({
 				x: clientX,
 				y: clientY
 			})
-	
+
 			points[drag_point].x = newpos.x;
 			points[drag_point].y = newpos.y;
 			drawWaypoints();
 		}
-	} 
+	}
 
-	if (start_point === undefined) 
+	if (start_point === undefined)
 		return;
 
 	delta = {
@@ -1338,18 +830,18 @@ function drag(event){
 		y: start_point.y - clientY,
 	};
 
-	if(mode == "Z" && drag_point >= 0){	
-		points[drag_point].z = drag_point_z + linearToStepScale(delta.y * 1.25); 
+	if (mode == "Z" && drag_point >= 0) {
+		points[drag_point].z = drag_point_z + linearToStepScale(delta.y * 1.25);
 
-		if(points[drag_point].z > 9999.99)
+		if (points[drag_point].z > 9999.99)
 			points[drag_point].z = 9999;
-		else if(points[drag_point].z < -9999.99)
+		else if (points[drag_point].z < -9999.99)
 			points[drag_point].z = -9999;
 
 		if (Math.abs(points[drag_point].z) >= 100)
 			points[drag_point].z = parseInt(points[drag_point].z);
 		else
-			points[drag_point].z = parseInt(points[drag_point].z*10)/10;
+			points[drag_point].z = parseInt(points[drag_point].z * 10) / 10;
 
 		drawWaypoints();
 	}
@@ -1371,28 +863,28 @@ function distancePointToLineSegment(px, py, x1, y1, x2, y2) {
 	return Math.sqrt(distanceSquared);
 }
 
-function endDrag(event){
+function endDrag(event) {
 
-	if(drag_point >= 0){
+	if (drag_point >= 0) {
 		view.setInputMovementEnabled(true);
 		drag_point = -1;
 	}
 
 	let moveDist = 0;
 
-	if(delta !== undefined){
-		moveDist = Math.hypot(delta.x,delta.y);
+	if (delta !== undefined) {
+		moveDist = Math.hypot(delta.x, delta.y);
 	}
 
-	if(moveDist < 10 && new Date() - start_stamp  < 300 && mode == "XY"){
+	if (moveDist < 10 && new Date() - start_stamp < 300 && mode == "XY") {
 
 		start_stamp = new Date("2010-3-2"); //debounce, and also when ROS box turtle was released
 
 		let { clientX, clientY } = event.touches ? event.touches[0] : event;
 
-		if(shift_pressed){
-			clientX = Math.round(clientX/20) * 20;
-			clientY = Math.round(clientY/20) * 20;
+		if (shift_pressed) {
+			clientX = Math.round(clientX / 20) * 20;
+			clientY = Math.round(clientY / 20) * 20;
 		}
 
 		const newpoint = {
@@ -1402,13 +894,13 @@ function endDrag(event){
 
 		let index = findPoint(newpoint);
 
-		if(index >= 0){ // remove point
+		if (index >= 0) { // remove point
 			points.splice(index, 1);
-		}else{
+		} else {
 			let before = -1;
 			for (let i = 0; i < points.length - 1; i++) {
 				const p0 = pointToScreen(points[i]);
-				const p1 = pointToScreen(points[i+1]);
+				const p1 = pointToScreen(points[i + 1]);
 
 				const distance = distancePointToLineSegment(
 					newpoint.x, newpoint.y,
@@ -1417,15 +909,15 @@ function endDrag(event){
 				);
 
 				if (distance <= 10) {
-					before = i+1;
+					before = i + 1;
 					break;
 				}
 			}
-		
-			if(before > 0){
+
+			if (before > 0) {
 				// insert new point between two others
 				const p = screenToPoint(newpoint);
-				const p0 = points[before-1];
+				const p0 = points[before - 1];
 				const p1 = points[before];
 
 				// Calculate the weight as the ratio of distances
@@ -1433,12 +925,12 @@ function endDrag(event){
 				const distP0P = Math.hypot(p.x - p0.x, p.y - p0.y);
 				p.z = p0.z + distP0P / distP0P1 * (p1.z - p0.z);
 				points.splice(before, 0, p);
-			}else{
+			} else {
 				// add point to the end
 				const p = screenToPoint(newpoint);
 
 				if (points.length > 0)
-					p.z = points[points.length-1].z;
+					p.z = points[points.length - 1].z;
 
 				points.push(p);
 			}
@@ -1452,7 +944,7 @@ function endDrag(event){
 	delta = undefined;
 }
 
-function resizeScreen(){
+function resizeScreen() {
 	canvas.height = window.innerHeight;
 	canvas.width = window.innerWidth;
 	drawWaypoints();
@@ -1463,8 +955,8 @@ window.addEventListener('orientationchange', resizeScreen);
 window.addEventListener("view_changed", drawWaypoints);
 
 window.addEventListener("tf_fixed_frame_changed", drawWaypoints);
-window.addEventListener("tf_changed", ()=>{
-	if(fixed_frame != tf.fixed_frame){
+window.addEventListener("tf_changed", () => {
+	if (fixed_frame != tf.fixed_frame) {
 		drawWaypoints();
 	}
 });
@@ -1474,30 +966,30 @@ view_container.addEventListener("mouseleave", (event) => {
 	endDrag(event);
 });
 
-function addListeners(){
+function addListeners() {
 	view_container.addEventListener('mousedown', startDrag);
 	view_container.addEventListener('mousemove', drag);
 	view_container.addEventListener('mouseup', endDrag);
 
 	view_container.addEventListener('touchstart', startDrag);
 	view_container.addEventListener('touchmove', drag);
-	view_container.addEventListener('touchend', endDrag);	
+	view_container.addEventListener('touchend', endDrag);
 }
 
-function removeListeners(){
+function removeListeners() {
 	view_container.removeEventListener('mousedown', startDrag);
 	view_container.removeEventListener('mousemove', drag);
 	view_container.removeEventListener('mouseup', endDrag);
 
 	view_container.removeEventListener('touchstart', startDrag);
 	view_container.removeEventListener('touchmove', drag);
-	view_container.removeEventListener('touchend', endDrag);	
+	view_container.removeEventListener('touchend', endDrag);
 }
 
-function setMode(newmode){
+function setMode(newmode) {
 	mode = newmode;
 
-	switch(mode){
+	switch (mode) {
 		case "IDLE":
 			stopPositionRecording();
 			removeListeners()
@@ -1573,12 +1065,12 @@ baseLinkFrameBox.addEventListener("change", (event) => {
 	saveSettings();
 });
 
-margin.addEventListener("input", (event) =>{
+margin.addEventListener("input", (event) => {
 	drawWaypoints();
 	saveSettings();
 });
 
-function find_base_frame(){
+function find_base_frame() {
 	//try base_link first
 	for (const key of tf.frame_list.values()) {
 		if (key.includes("base_link")) {
@@ -1604,28 +1096,28 @@ function find_base_frame(){
 	return "base_link";
 }
 
-async function loadTopics(){
+async function loadTopics() {
 	const result_path = await rosbridge.get_topics("nav_msgs/msg/Path");
 	const result_array = await rosbridge.get_topics("geometry_msgs/msg/PoseArray");
 
 	let topiclist = "";
 	result_path.forEach(element => {
-		topiclist += "<option value='"+element+"'>"+element+" (Path)</option>";
+		topiclist += "<option value='" + element + "'>" + element + " (Path)</option>";
 		typedict[element] = "nav_msgs/msg/Path";
 	});
 	result_array.forEach(element => {
-		topiclist += "<option value='"+element+"'>"+element+" (PoseArray)</option>";
+		topiclist += "<option value='" + element + "'>" + element + " (PoseArray)</option>";
 		typedict[element] = "geometry_msgs/msg/PoseArray";
 	});
 	selectionbox.innerHTML = topiclist
 
-	if(topic == "")
+	if (topic == "")
 		topic = selectionbox.value;
-	else{
-		if(result_path.includes(topic) || result_array.includes(topic)){
+	else {
+		if (result_path.includes(topic) || result_array.includes(topic)) {
 			selectionbox.value = topic;
-		}else{
-			topiclist += "<option value='"+topic+"'>"+topic+"</option>"
+		} else {
+			topiclist += "<option value='" + topic + "'>" + topic + "</option>"
 			selectionbox.innerHTML = topiclist
 			selectionbox.value = topic;
 		}
@@ -1634,24 +1126,24 @@ async function loadTopics(){
 	//find frames
 	let framelist = "";
 	for (const key of tf.frame_list.values()) {
-		framelist += "<option value='"+key+"'>"+key+"</option>"
+		framelist += "<option value='" + key + "'>" + key + "</option>"
 	}
 	fixedFrameBox.innerHTML = framelist;
 
-	if(tf.frame_list.has(fixed_frame)){
+	if (tf.frame_list.has(fixed_frame)) {
 		fixedFrameBox.value = fixed_frame;
-	}else{
-		framelist += "<option value='"+fixed_frame+"'>"+fixed_frame+"</option>"
+	} else {
+		framelist += "<option value='" + fixed_frame + "'>" + fixed_frame + "</option>"
 		fixedFrameBox.innerHTML = framelist;
 		fixedFrameBox.value = fixed_frame;
 	}
 
 	baseLinkFrameBox.innerHTML = framelist;
-	
-	if(tf.frame_list.has(base_link_frame)){
+
+	if (tf.frame_list.has(base_link_frame)) {
 		baseLinkFrameBox.value = base_link_frame;
-	}else{
-		framelist += "<option value='"+fixed_frame+"'>"+fixed_frame+"</option>"
+	} else {
+		framelist += "<option value='" + fixed_frame + "'>" + fixed_frame + "</option>"
 		baseLinkFrameBox.innerHTML = framelist;
 		baseLinkFrameBox.value = base_link_frame;
 	}
@@ -1666,8 +1158,8 @@ loadTopics();
 
 //dropdown stuff
 
-function dropdown_visibility(open){
-	if(open)
+function dropdown_visibility(open) {
+	if (open)
 		dropdown.style.display = "block";
 	else
 		dropdown.style.display = "none";
@@ -1677,9 +1169,9 @@ function dropdown_visibility(open){
 icon.addEventListener("click", (event) => {
 	event.stopPropagation();
 
-	if(mode != "IDLE"){
+	if (mode != "IDLE") {
 		setMode("IDLE");
-	}else{
+	} else {
 		const rect = icon.getBoundingClientRect();
 		const dropdownWidth = 90;
 		let top = rect.bottom + 5; // Default: below the icon
@@ -1695,7 +1187,7 @@ icon.addEventListener("click", (event) => {
 
 		dropdown.style.top = `${top}px`;
 		dropdown.style.left = `${left}px`;
-	
+
 		dropdown_visibility(dropdown.style.display == "none")
 	}
 });
@@ -1724,7 +1216,7 @@ const startButton = document.getElementById("{uniqueID}_start");
 const stopButton = document.getElementById("{uniqueID}_stop");
 
 drop_start.addEventListener("click", (event) => {
-	if(startCheckbox.checked)
+	if (startCheckbox.checked)
 		sendMessage(points.slice(getStartIndex()))
 	else
 		sendMessage(points)
