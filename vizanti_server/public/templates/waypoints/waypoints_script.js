@@ -3,14 +3,16 @@ let tfModule = await import(`${base_url}/js/modules/tf.js`);
 let rosbridgeModule = await import(`${base_url}/js/modules/rosbridge.js`);
 let persistentModule = await import(`${base_url}/js/modules/persistent.js`);
 let StatusModule = await import(`${base_url}/js/modules/status.js`);
-let missionUtils = await import(`${base_url}/js/modules/mission_utils.js`);
 let drawWaypointsModule = await import(`${base_url}/js/modules/draw_waypoints.js`);
+
+let missionRecorderModule = await import(`${base_url}/js/modules/mission_recorder.js`);
 
 let view = viewModule.view;
 let tf = tfModule.tf;
 let rosbridge = rosbridgeModule.rosbridge;
 let settings = persistentModule.settings;
 let Status = StatusModule.Status;
+let MissionRecorder = new missionRecorderModule.MissionRecorder(rosbridge.ros, "/panther/mission_recorder");
 
 let topic = getTopic("{uniqueID}");
 let status = new Status(
@@ -25,11 +27,6 @@ let mode = "IDLE";
 let points = [];
 let shift_pressed = false;
 
-let gpsExportServiceDict = {};
-let gpsImportServiceDict = {};
-let selectedGpsExportService = "";
-let selectedGpsImportService = "";
-
 const icon_bar = document.getElementById("icon_bar");
 const icon = document.getElementById("{uniqueID}_icon");
 const dropdown = document.getElementById("{uniqueID}_dropdown");
@@ -42,29 +39,16 @@ const flipButton = document.getElementById("{uniqueID}_flip");
 const zSetButton = document.getElementById("{uniqueID}_z_set");
 const deleteButton = document.getElementById("{uniqueID}_delete");
 
-const exportButton = document.getElementById("{uniqueID}_export");
-const importButton = document.getElementById("{uniqueID}_import");
-const importInput = document.getElementById("{uniqueID}_import_input");
 const useGpsCoordinatesCheckbox = document.getElementById("{uniqueID}_use_gps_coordinates");
-const gpsServiceContainer = document.getElementById("{uniqueID}_gps_service_container");
-const gpsExportServiceBox = document.getElementById("{uniqueID}_gps_export_service");
-const gpsImportServiceBox = document.getElementById("{uniqueID}_gps_import_service");
 
 const missionSelect = document.getElementById("{uniqueID}_mission_select");
 const missionNameInput = document.getElementById("{uniqueID}_mission_name");
-const saveMissionButton = document.getElementById("{uniqueID}_save_mission");
-const loadMissionButton = document.getElementById("{uniqueID}_load_mission");
+const updateMissionButton = document.getElementById("{uniqueID}_update_mission");
 const deleteMissionButton = document.getElementById("{uniqueID}_delete_mission");
 
 const recordMaxThresholdInput = document.getElementById("{uniqueID}_record_position_max_threshold");
 const recordMinThresholdInput = document.getElementById("{uniqueID}_record_position_min_threshold");
 const recordAngleThresholdInput = document.getElementById("{uniqueID}_record_angle_threshold");
-
-let isRecording = false;
-let recordMaxThreshold = 5.0;
-let recordMinThreshold = 0.5;
-let recordAngleThreshold = 0.52; // ~30 degrees in radians
-let recordingTimer = null;
 
 flipButton.addEventListener('click', () => {
 	points.reverse();
@@ -95,85 +79,24 @@ startCheckbox.addEventListener('change', () => {
 	saveSettings();
 });
 
-exportButton.addEventListener('click', () => {
-	try {
-		missionUtils.exportMissionsToFile(getSavedMissions(), useGpsCoordinatesCheckbox.checked, selectedGpsExportService);
-		status.setOK("Missions exported successfully");
-	} catch (error) {
-		status.setError(`Failed to export missions: ${error.message}`);
-	}
-});
+useGpsCoordinatesCheckbox.addEventListener('change', saveSettings);
 
-importButton.addEventListener('click', () => {
-	importInput.click();
-});
-
-importInput.addEventListener('change', async (event) => {
-	const file = event.target.files[0];
-	if (file) {
-		try {
-			const convertedMissions = await missionUtils.importMissionsFromFile(file, getSavedMissions(), useGpsCoordinatesCheckbox.checked, selectedGpsImportService);
-
-			const missionKey = getMissionKey();
-			settings[missionKey] = convertedMissions;
-			settings.save();
-
-			updateMissionSelect();
-
-			status.setOK("Missions imported successfully");
-		} catch (error) {
-			status.setError(`Failed to import missions: ${error.message}`);
-			importInput.value = '';
-		}
-	}
-});
-
-useGpsCoordinatesCheckbox.addEventListener('change', () => {
-	if (useGpsCoordinatesCheckbox.checked) {
-		gpsServiceContainer.style.display = 'block';
-		loadGpsServices();
-	} else {
-		gpsServiceContainer.style.display = 'none';
-	}
-	saveSettings();
-});
-
-gpsExportServiceBox.addEventListener("change", (event) => {
-	selectedGpsExportService = gpsExportServiceBox.value;
-	saveSettings();
-});
-
-gpsImportServiceBox.addEventListener("change", (event) => {
-	selectedGpsImportService = gpsImportServiceBox.value;
-	saveSettings();
-});
-
-saveMissionButton.addEventListener('click', saveMission);
-loadMissionButton.addEventListener('click', loadMission);
+updateMissionButton.addEventListener('click', updateMission);
 deleteMissionButton.addEventListener('click', deleteMission);
 
 missionSelect.addEventListener('change', () => {
 	const selectedMission = missionSelect.value;
-	missionNameInput.value = selectedMission;
+	const missionData = JSON.parse(selectedMission);
+	missionNameInput.value = missionData.name;
+	loadMission();
 });
 
-recordMaxThresholdInput.addEventListener('change', () => {
-	recordMaxThreshold = parseFloat(recordMaxThresholdInput.value);
-	saveSettings();
-});
-
-recordMinThresholdInput.addEventListener('change', () => {
-	recordMinThreshold = parseFloat(recordMinThresholdInput.value);
-	saveSettings();
-});
-
-recordAngleThresholdInput.addEventListener('change', () => {
-	recordAngleThreshold = parseFloat(recordAngleThresholdInput.value) * (Math.PI / 180);
-	saveSettings();
-});
+recordMaxThresholdInput.addEventListener('change', saveSettings);
+recordMinThresholdInput.addEventListener('change', saveSettings);
+recordAngleThresholdInput.addEventListener('change', saveSettings);
 
 function drawWaypoints() {
-	try{
+	try {
 		drawWaypointsModule.drawWaypoints(canvas, ctx, view, points, tf, fixed_frame, mode, margin.value, getStartIndex());
 		status.setOK();
 	} catch (error) {
@@ -190,57 +113,6 @@ function screenToPoint(click) {
 	return drawWaypointsModule.screenToPoint(click, view, tf, fixed_frame);
 }
 
-async function loadGpsServices() {
-	try {
-		console.log("Loading GPS coordinate services...");
-		const toLLServices = await rosbridge.get_services("robot_localization/srv/ToLL");
-		const fromLLArrayServices = await rosbridge.get_services("robot_localization/srv/FromLLArray");
-
-		let exportServiceList = "";
-		let importServiceList = "";
-
-		// Add ToLL services (fallback for export)
-		toLLServices.forEach(service => {
-			exportServiceList += `<option value='${service}'>${service} (ToLL)</option>`;
-			gpsExportServiceDict[service] = "robot_localization/srv/ToLL";
-		});
-
-		// Add FromLLArray services (preferred for import)
-		fromLLArrayServices.forEach(service => {
-			importServiceList += `<option value='${service}'>${service} (FromLLArray)</option>`;
-			gpsImportServiceDict[service] = "robot_localization/srv/FromLLArray";
-		});
-
-		gpsExportServiceBox.innerHTML = exportServiceList;
-		gpsImportServiceBox.innerHTML = importServiceList;
-
-		if (exportServiceList === "") {
-			console.log(`No ToLL services found, defaulting to ${selectedGpsExportService}`);
-			gpsExportServiceBox.innerHTML = `<option value='${selectedGpsExportService}'>${selectedGpsExportService} (default)</option>`;
-		}
-		if (importServiceList === "") {
-			console.log(`No FromLLArray services found, defaulting to ${selectedGpsImportService}`);
-			gpsImportServiceBox.innerHTML = `<option value='${selectedGpsImportService}'>${selectedGpsImportService} (default)</option>`;
-		}
-
-		if (toLLServices.includes(selectedGpsExportService)) {
-			gpsExportServiceBox.value = selectedGpsExportService;
-		} else {
-			selectedGpsExportService = gpsExportServiceBox.value;
-		}
-
-		if (fromLLArrayServices.includes(selectedGpsImportService)) {
-			gpsImportServiceBox.value = selectedGpsImportService;
-		} else {
-			selectedGpsImportService = gpsImportServiceBox.value;
-		}
-
-	} catch (error) {
-		console.error("Error loading GPS services:", error);
-		status.setWarn("Failed to load GPS coordinate services");
-	}
-}
-
 // Mission management
 
 function getMissionKey() {
@@ -252,10 +124,16 @@ function getSavedMissions() {
 	return settings[missionKey] || {};
 }
 
-function saveMission() {
-	const missionName = missionNameInput.value.trim();
+async function updateMission() {
+	const selectedMission = missionSelect.value;
+	if (!selectedMission) {
+		status.setWarn("Please select a mission to update");
+		return;
+	}
+
+	const missionName = missionNameInput.value;
 	if (!missionName) {
-		status.setWarn("Please enter a mission name");
+		status.setWarn("Mission name cannot be empty");
 		return;
 	}
 
@@ -264,43 +142,32 @@ function saveMission() {
 		return;
 	}
 
-	const missions = getSavedMissions();
+	const useGPS = useGpsCoordinatesCheckbox.checked;
+	const missionData = JSON.parse(selectedMission);
 
-	// Check if mission already exists
-	if (missions[missionName]) {
-		const overwrite = confirm(`Mission "${missionName}" already exists. Do you want to overwrite it?`);
-		if (!overwrite) {
-			status.setWarn("Save cancelled by user");
-			return;
-		}
-	}
-
-	const missionData = {
+	const info = {
+		id: missionData.id,
 		name: missionName,
-		date: new Date().toISOString(),
-		fixed_frame: fixed_frame,
-		base_link_frame: base_link_frame,
-		waypoints: points.map((point, index) => ({
-			index: index,
+		type: useGPS ? "gps" : "cartesian",
+	};
+
+	const poses = points.map(point => ({
+		position: {
 			x: point.x,
 			y: point.y,
 			z: point.z
-		})),
-		settings: {
-			margin: margin.value,
-			start_closest: startCheckbox.checked
 		}
-	};
+	}));
 
-	missions[missionName] = missionData;
+	const result = await MissionRecorder.updateMission(info, poses);
 
-	const missionKey = getMissionKey();
-	settings[missionKey] = missions;
-	settings.save();
+	if (!result.success) {
+		status.setError(`Failed to update mission: ${result.message}`);
+		return;
+	}
 
-	updateMissionSelect();
-	missionSelect.value = missionName;
-	status.setOK(`Mission "${missionName}" saved successfully`);
+	updateMissionSelect(missionData.id);
+	status.setOK(`Mission "${missionName}" updated successfully`);
 }
 
 async function loadMission() {
@@ -310,53 +177,25 @@ async function loadMission() {
 		return;
 	}
 
-	const missions = getSavedMissions();
-	const missionData = missions[selectedMission];
+	const missionData = JSON.parse(selectedMission);
+	const result = await MissionRecorder.getMission(missionData.id);
 
-	if (!missionData) {
-		status.setError("Mission not found");
+	if (!result.success) {
+		status.setError(`Failed to load mission: ${result.message}`);
 		return;
 	}
 
-	// Ask user if they want to replace existing waypoints
-	if (points.length > 0) {
-		const replace = await confirm(`Replace current waypoints with mission "${selectedMission}"?`);
-		if (!replace) {
-			return;
-		}
-	}
-
 	// Load waypoints
-	points = missionData.waypoints.map(wp => ({
-		x: wp.x || 0,
-		y: wp.y || 0,
-		z: wp.z || 0
+	const mission = result.mission;
+	points = mission.poses.map(pose => ({
+		x: pose.position.x || 0,
+		y: pose.position.y || 0,
+		z: pose.position.z || 0
 	}));
-
-	// Load settings if available
-	if (missionData.settings) {
-		if (missionData.settings.margin !== undefined) {
-			margin.value = missionData.settings.margin;
-		}
-		if (missionData.settings.start_closest !== undefined) {
-			startCheckbox.checked = missionData.settings.start_closest;
-		}
-	}
-
-	// Update frames if they exist in the mission and are available
-	if (missionData.fixed_frame && tf.frame_list.has(missionData.fixed_frame)) {
-		fixed_frame = missionData.fixed_frame;
-		fixedFrameBox.value = fixed_frame;
-	}
-
-	if (missionData.base_link_frame && tf.frame_list.has(missionData.base_link_frame)) {
-		base_link_frame = missionData.base_link_frame;
-		baseLinkFrameBox.value = base_link_frame;
-	}
 
 	drawWaypoints();
 	saveSettings();
-	status.setOK(`Mission "${selectedMission}" loaded successfully (${points.length} waypoints)`);
+	status.setOK(`Mission "${missionData.name}" loaded successfully (${points.length} waypoints)`);
 }
 
 async function deleteMission() {
@@ -366,36 +205,50 @@ async function deleteMission() {
 		return;
 	}
 
-	const confirmDelete = await confirm(`Are you sure you want to delete mission "${selectedMission}"?`);
+	const missionData = JSON.parse(selectedMission);
+	const confirmDelete = await confirm(`Are you sure you want to delete mission "${missionData.name}"?`);
 	if (!confirmDelete) {
 		return;
 	}
 
-	const missions = getSavedMissions();
-	delete missions[selectedMission];
+	const result = await MissionRecorder.deleteMission(missionData.id);
 
-	const missionKey = getMissionKey();
-	settings[missionKey] = missions;
-	settings.save();
+	if (!result.success) {
+		status.setError(`Failed to delete mission: ${result.message}`);
+		return;
+	}
 
 	updateMissionSelect();
 	missionNameInput.value = "";
-	status.setOK(`Mission "${selectedMission}" deleted successfully`);
+	status.setOK(`Mission "${missionData.name}" deleted successfully`);
 }
 
-function updateMissionSelect() {
-	const missions = getSavedMissions();
-	const missionNames = Object.keys(missions).sort();
+async function updateMissionSelect(defaultMissionID = null) {
+	const response = await MissionRecorder.listMissions();
+	const missions = response.missions;
+
+	// Save the currently selected value
+	let defaultMission = missionSelect.value;
 
 	let optionsHtml = '<option value="">-- Select Mission --</option>';
-	missionNames.forEach(name => {
-		const mission = missions[name];
-		const waypointCount = mission.waypoints ? mission.waypoints.length : 0;
-		const date = new Date(mission.date).toLocaleDateString();
-		optionsHtml += `<option value="${name}">${name} (${waypointCount} points, ${date})</option>`;
+	missions.forEach(mission => {
+		// Store both id and name as a JSON string in the value attribute
+		const optionValue = JSON.stringify({ id: mission.id, name: mission.name });
+		optionsHtml += `<option value='${optionValue}'>${mission.name} (ID: ${mission.id})</option>`;
 	});
 
 	missionSelect.innerHTML = optionsHtml;
+
+	if (defaultMissionID) {
+		// Try to set the default mission based on the provided ID
+		defaultMission = JSON.stringify({ id: defaultMissionID, name: missions.find(m => m.id === defaultMissionID)?.name || "" });
+	}
+
+	// Restore the default mission if it still exists
+	if (defaultMission && Array.from(missionSelect.options).some(opt => opt.value === defaultMission)) {
+		missionSelect.value = defaultMission;
+		missionNameInput.value = JSON.parse(defaultMission).name;
+	}
 }
 
 // Initialize mission select
@@ -403,109 +256,73 @@ updateMissionSelect();
 
 // Position recording
 
-function startPositionRecording() {
-	if (!base_link_frame || base_link_frame === "") {
-		status.setWarn("Please select a robot frame first");
+async function startPositionRecording() {
+	await updateRecordingParameters();
+
+	let posesCallback = (message) => {
+		points = message.poses.map(pose => ({
+			x: pose.position.x,
+			y: pose.position.y,
+			z: pose.position.z
+		}));
+		drawWaypoints();
+	}
+
+	const result = await MissionRecorder.startRecording(posesCallback);
+	if (result.success) {
+		console.log("Started recording waypoints");
+	} else {
+		console.warn("Failed to start recording waypoints:", result.message);
+	}
+}
+
+async function stopPositionRecording() {
+	const result = await MissionRecorder.stopRecording();
+	if (!result.success) {
+		console.warn("Failed to stop recording waypoints:", result.message);
 		return;
 	}
 
-	recordMaxThreshold = parseFloat(recordMaxThresholdInput.value);
-	recordMinThreshold = parseFloat(recordMinThresholdInput.value);
-	recordAngleThreshold = parseFloat(recordAngleThresholdInput.value) * (Math.PI / 180);
+	console.log("Stopped recording waypoints");
 
-	isRecording = true;
+	// list missions and find the one we just recorded to get the final list of waypoints
+	const response = await MissionRecorder.listMissions();
+	// get last mission as the end element of the list
+	const latestMissionID = response.missions[response.missions.length - 1].id;
 
-	// Start recording loop at 10Hz
-	recordingTimer = setInterval(() => {
-		recordCurrentPosition();
-	}, 100);
+	const latestMission = await MissionRecorder.getMission(latestMissionID);
+	points = latestMission.mission.poses.map(pose => ({
+		x: pose.position.x,
+		y: pose.position.y,
+		z: pose.position.z
+	}));
 
-	status.setOK(`Started recording waypoints from ${base_link_frame} frame`);
-}
+	// TODO: update mission select to include the new mission and select it
+	updateMissionSelect(latestMissionID);
 
-function stopPositionRecording() {
-	if (!isRecording) return;
-
-	if (recordingTimer) {
-		clearInterval(recordingTimer);
-		recordingTimer = null;
-	}
-
-	isRecording = false;
-
-	status.setOK("Stopped recording waypoints");
+	drawWaypoints();
 	saveSettings();
 }
 
-function recordCurrentPosition() {
-	if (!isRecording) return;
+async function updateRecordingParameters() {
+	let recordMaxThreshold = parseFloat(recordMaxThresholdInput.value);
+	let recordMinThreshold = parseFloat(recordMinThresholdInput.value);
+	let recordAngleThreshold = parseFloat(recordAngleThresholdInput.value) * (Math.PI / 180);
 
-	try {
-		const robotTransform = tf.transformPose(
-			base_link_frame,
-			fixed_frame,
-			{ x: 0, y: 0, z: 0 },
-			new Quaternion()
-		);
+	const params = [
+		{ name: "record_max_threshold", value: recordMaxThreshold },
+		{ name: "record_min_threshold", value: recordMinThreshold },
+		{ name: "record_angle_threshold", value: recordAngleThreshold }
+	];
+	const result = await MissionRecorder.setDoubleParameters(params);
 
-		const currentPosition = robotTransform.translation;
-		const currentYaw = robotTransform.rotation.toEuler().h;
-
-		if (shouldRecordPoint(currentPosition, currentYaw)) {
-			points.push({
-				x: currentPosition.x,
-				y: currentPosition.y,
-				z: currentPosition.z
-			});
-
-			drawWaypoints();
-
-			status.setOK(`Recording... ${points.length} waypoints`);
+	result.results.forEach((res, index) => {
+		if (!res.successful) {
+			console.warn(`Failed to set parameter ${params[index].name}: ${res.reason}`);
 		}
+	});
 
-	} catch (error) {
-		console.warn("Failed to get robot position from TF:", error);
-	}
-}
-
-function shouldRecordPoint(currentPosition, currentYaw) {
-	if (points.length === 0) {
-		return true;
-	}
-
-	const lastPoint = points[points.length - 1];
-
-	const distance = Math.sqrt(
-		Math.pow(currentPosition.x - lastPoint.x, 2) +
-		Math.pow(currentPosition.y - lastPoint.y, 2) +
-		Math.pow(currentPosition.z - lastPoint.z, 2)
-	);
-
-	let lastYaw = 0;
-	if (points.length >= 2) {
-		const secondToLastPoint = points[points.length - 2];
-		lastYaw = Math.atan2(lastPoint.y - secondToLastPoint.y, lastPoint.x - secondToLastPoint.x);
-	}
-
-	// Check angle between current position and last point to determine direction of movement
-	const positionYaw = Math.atan2(currentPosition.y - lastPoint.y, currentPosition.x - lastPoint.x);
-	const reversing = Math.abs(wrapAngle(positionYaw - currentYaw)) > Math.PI / 2;
-	if (reversing) {
-		lastYaw = lastYaw < 0 ? lastYaw + Math.PI : lastYaw - Math.PI;
-	}
-
-	const yawDiff = Math.abs(wrapAngle(lastYaw - currentYaw));
-	return distance >= recordMinThreshold && (distance >= recordMaxThreshold || yawDiff >= recordAngleThreshold);
-}
-
-function wrapAngle(angle) {
-	while (angle > Math.PI) {
-		angle -= 2 * Math.PI;
-	}
-	while (angle < -Math.PI) {
-		angle += 2 * Math.PI;
-	}
-	return angle;
+	saveSettings();
 }
 
 // Settings
@@ -520,25 +337,13 @@ if (settings.hasOwnProperty("{uniqueID}")) {
 	margin.value = loaded_data.margin ?? 0.8;
 	startCheckbox.checked = loaded_data.start_closest;
 
-	recordMaxThreshold = loaded_data.record_position_max_threshold ?? 5.0;
-	recordMaxThresholdInput.value = recordMaxThreshold;
-
-	recordMinThreshold = loaded_data.record_position_min_threshold ?? 0.5;
-	recordMinThresholdInput.value = recordMinThreshold;
-
-	recordAngleThreshold = loaded_data.record_angle_threshold ?? 0.52;
-	recordAngleThresholdInput.value = Math.round(recordAngleThreshold * (180 / Math.PI));
+	recordMaxThresholdInput.value = loaded_data.record_position_max_threshold ?? 5.0;
+	recordMinThresholdInput.value = loaded_data.record_position_min_threshold ?? 0.5;
+	recordAngleThresholdInput.value = Math.round((loaded_data.record_angle_threshold ?? 0.52) * (180 / Math.PI));
 
 	useGpsCoordinatesCheckbox.checked = loaded_data.use_gps_coordinates;
 
-	selectedGpsExportService = loaded_data.gps_export_service ?? "/toLL";
-	selectedGpsImportService = loaded_data.gps_import_service ?? "/fromLLArray";
-
-	// Show GPS service container if GPS coordinates are enabled
-	if (loaded_data.use_gps_coordinates) {
-		gpsServiceContainer.style.display = 'block';
-		loadGpsServices();
-	}
+	missionSelect.value = loaded_data.selected_mission;
 
 	if (loaded_data.topic_type != undefined)
 		typedict[topic] = loaded_data.topic_type;
@@ -567,12 +372,11 @@ function saveSettings() {
 		points: points,
 		start_closest: startCheckbox.checked,
 		margin: margin.value,
-		record_position_max_threshold: recordMaxThreshold,
-		record_position_min_threshold: recordMinThreshold,
-		record_angle_threshold: recordAngleThreshold,
+		record_position_max_threshold: recordMaxThresholdInput.value,
+		record_position_min_threshold: recordMinThresholdInput.value,
+		record_angle_threshold: recordAngleThresholdInput.value * (Math.PI / 180),
 		use_gps_coordinates: useGpsCoordinatesCheckbox.checked,
-		gps_export_service: selectedGpsExportService,
-		gps_import_service: selectedGpsImportService
+		selected_mission: missionSelect.value
 	}
 	settings.save();
 }
@@ -1147,11 +951,6 @@ async function loadTopics() {
 		baseLinkFrameBox.innerHTML = framelist;
 		baseLinkFrameBox.value = base_link_frame;
 	}
-
-	// Load GPS services if checkbox is checked
-	if (useGpsCoordinatesCheckbox.checked) {
-		await loadGpsServices();
-	}
 }
 
 loadTopics();
@@ -1199,11 +998,7 @@ document.addEventListener("click", (event) => {
 	}
 });
 
-window.addEventListener('beforeunload', () => {
-	if (isRecording) {
-		stopPositionRecording();
-	}
-});
+window.addEventListener('beforeunload', stopPositionRecording);
 
 const drop_start = document.getElementById("{uniqueID}_sendAction");
 const drop_stop = document.getElementById("{uniqueID}_stopAction");
