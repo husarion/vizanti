@@ -268,9 +268,6 @@ function getPose(x, y, z, quat) {
 	});
 }
 
-// Initialize mission select
-updateMissionSelect();
-
 // Settings
 
 if (settings.hasOwnProperty("{uniqueID}")) {
@@ -303,6 +300,9 @@ function saveSettings() {
 	}
 	settings.save();
 }
+
+// Initialize mission select
+updateMissionSelect();
 
 // Messaging
 
