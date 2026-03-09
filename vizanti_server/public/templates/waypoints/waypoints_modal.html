@@ -31,15 +31,18 @@
 		<p><strong>Record:</strong> Record positions automatically based on robot position.</p>
 
 		<label for="{uniqueID}_record_position_max_threshold">Recording Position Max Threshold (meters):</label>
-		<input type="number" id="{uniqueID}_record_position_max_threshold" value="5.0" step="0.1" min="0.1" max="10" style="width: 80px;">
+		<input type="number" id="{uniqueID}_record_position_max_threshold" value="5.0" step="0.1" min="0.1" max="10"
+			style="width: 80px;">
 		<div class="spacer"></div>
 
 		<label for="{uniqueID}_record_position_min_threshold">Recording Position Min Threshold (meters):</label>
-		<input type="number" id="{uniqueID}_record_position_min_threshold" value="0.5" step="0.1" min="0.1" max="10" style="width: 80px;">
+		<input type="number" id="{uniqueID}_record_position_min_threshold" value="0.5" step="0.1" min="0.1" max="10"
+			style="width: 80px;">
 		<div class="spacer"></div>
 
 		<label for="{uniqueID}_record_angle_threshold">Recording Position Angle Threshold (degrees):</label>
-		<input type="number" id="{uniqueID}_record_angle_threshold" value="30" step="1" min="0" max="180" style="width: 80px;">
+		<input type="number" id="{uniqueID}_record_angle_threshold" value="30" step="1" min="0" max="180"
+			style="width: 80px;">
 
 		<p style="color: #b4b4b4;">
 			The max distance the robot can diverge from the path being recorded is denoted by the following equation:
@@ -61,6 +64,12 @@
 		<div class="spacer"></div>
 
 		<h4>Mission Selector</h4>
+
+		<div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+			<label for="{uniqueID}_mission_node_name">Node Name:</label>
+			<input id="{uniqueID}_mission_node_name" type="text" value="mission_recorder">
+		</div>
+
 		<div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
 			<label for="{uniqueID}_mission_select">Mission:</label>
 			<select id="{uniqueID}_mission_select" style="flex: 1;">
@@ -68,7 +77,9 @@
 			</select>
 			<button id="{uniqueID}_delete_mission" style="background-color: rgb(104, 78, 31);">Delete</button>
 		</div>
+
 		<div style="display: flex; gap: 10px; align-items: center;">
+			<label for="{uniqueID}_mission_name">Mission Name:</label>
 			<input type="text" id="{uniqueID}_mission_name" placeholder="Mission name..." style="flex: 1;">
 			<button id="{uniqueID}_update_mission" style="background-color: rgb(31, 78, 52);">Update Mission</button>
 		</div>

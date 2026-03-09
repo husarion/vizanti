@@ -12,7 +12,7 @@ let tf = tfModule.tf;
 let rosbridge = rosbridgeModule.rosbridge;
 let settings = persistentModule.settings;
 let Status = StatusModule.Status;
-let MissionRecorder = new missionRecorderModule.MissionRecorder(rosbridge.ros, "/panther/mission_recorder");
+let MissionRecorder = new missionRecorderModule.MissionRecorder(rosbridge.ros, "mission_recorder");
 
 let topic = getTopic("{uniqueID}");
 let status = new Status(
@@ -41,6 +41,7 @@ const deleteButton = document.getElementById("{uniqueID}_delete");
 
 const useGpsCoordinatesCheckbox = document.getElementById("{uniqueID}_use_gps_coordinates");
 
+const missionNodeNamebox = document.getElementById("{uniqueID}_mission_node_name");
 const missionSelect = document.getElementById("{uniqueID}_mission_select");
 const missionNameInput = document.getElementById("{uniqueID}_mission_name");
 const updateMissionButton = document.getElementById("{uniqueID}_update_mission");
@@ -84,6 +85,12 @@ useGpsCoordinatesCheckbox.addEventListener('change', saveSettings);
 updateMissionButton.addEventListener('click', updateMission);
 deleteMissionButton.addEventListener('click', deleteMission);
 
+missionNodeNamebox.addEventListener("change", () => {
+	MissionRecorder.setNodeName(missionNodeNamebox.value);
+	updateMissionSelect();
+	saveSettings();
+});
+
 missionSelect.addEventListener('change', () => {
 	const selectedMission = missionSelect.value;
 	const missionData = JSON.parse(selectedMission);
@@ -114,15 +121,6 @@ function screenToPoint(click) {
 }
 
 // Mission management
-
-function getMissionKey() {
-	return "{uniqueID}_missions";
-}
-
-function getSavedMissions() {
-	const missionKey = getMissionKey();
-	return settings[missionKey] || {};
-}
 
 async function updateMission() {
 	const selectedMission = missionSelect.value;
@@ -159,7 +157,7 @@ async function updateMission() {
 		}
 	}));
 
-	const result = await MissionRecorder.updateMission(info, poses);
+	const result = await MissionRecorder.overrideMission(info, poses);
 
 	if (!result.success) {
 		status.setError(`Failed to update mission: ${result.message}`);
@@ -224,13 +222,28 @@ async function deleteMission() {
 }
 
 async function updateMissionSelect(defaultMissionID = null) {
-	const response = await MissionRecorder.listMissions();
+	let response;
+	let optionsHtml = '<option value="">-- Select Mission --</option>';
+
+	try {
+		response = await MissionRecorder.listMissions();
+	} catch (error) {
+		status.setError(`Failed to list missions: ${error.message}`);
+		missionSelect.innerHTML = optionsHtml;
+		return;
+	}
+
+	if (!response.success) {
+		status.setError(`Failed to load missions: ${response.message}`);
+		missionSelect.innerHTML = optionsHtml;
+		return;
+	}
+
 	const missions = response.missions;
 
 	// Save the currently selected value
 	let defaultMission = missionSelect.value;
 
-	let optionsHtml = '<option value="">-- Select Mission --</option>';
 	missions.forEach(mission => {
 		// Store both id and name as a JSON string in the value attribute
 		const optionValue = JSON.stringify({ id: mission.id, name: mission.name });
@@ -249,10 +262,9 @@ async function updateMissionSelect(defaultMissionID = null) {
 		missionSelect.value = defaultMission;
 		missionNameInput.value = JSON.parse(defaultMission).name;
 	}
-}
 
-// Initialize mission select
-updateMissionSelect();
+	status.setOK();
+}
 
 // Position recording
 
@@ -334,6 +346,10 @@ if (settings.hasOwnProperty("{uniqueID}")) {
 	fixed_frame = loaded_data.fixed_frame ?? tf.fixed_frame;
 	base_link_frame = loaded_data.base_link_frame ?? "base_link";
 
+	missionNodeNamebox.value = loaded_data.mission_node_name ?? "mission_recorder";
+	// Ensure the MissionRecorder instance has the correct node name
+	MissionRecorder.setNodeName(missionNodeNamebox.value);
+
 	margin.value = loaded_data.margin ?? 0.8;
 	startCheckbox.checked = loaded_data.start_closest;
 
@@ -369,6 +385,7 @@ function saveSettings() {
 		topic_type: typedict[topic],
 		fixed_frame: fixed_frame,
 		base_link_frame: base_link_frame,
+		mission_node_name: missionNodeNamebox.value,
 		points: points,
 		start_closest: startCheckbox.checked,
 		margin: margin.value,
@@ -380,6 +397,9 @@ function saveSettings() {
 	}
 	settings.save();
 }
+
+// Initialize mission select
+updateMissionSelect();
 
 // Message sending
 
@@ -1040,6 +1060,7 @@ drop_z.addEventListener("click", (event) => {
 
 drop_config.addEventListener("click", (event) => {
 	loadTopics();
+	MissionRecorder.setNodeName(missionNodeNamebox.value);
 	updateMissionSelect();
 	openModal("{uniqueID}_modal");
 	dropdown_visibility(false);

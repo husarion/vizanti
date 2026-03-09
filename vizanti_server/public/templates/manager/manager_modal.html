@@ -6,8 +6,10 @@
 
 		<hr class="dark_hr" />
 
-		<label for="{uniqueID}_nodename">Navigation Manager Node Name:</label>
-		<input id="{uniqueID}_nodename" type="text" value="navigation_manager">
+		<div style="display: flex; gap: 10px; align-items: center;">
+			<label for="{uniqueID}_node_name">Navigation Manager Node Name:</label>
+			<input id="{uniqueID}_node_name" type="text">
+		</div>
 
 		<hr class="dark_hr" />
 
@@ -25,37 +27,23 @@
 
 		<hr class="dark_hr" />
 
-		<label for="{uniqueID}_fixed_frame">Fixed Frame:</label>
-		<select id="{uniqueID}_fixed_frame" name="topic">
-			<option value="map">map</option>
-		</select>
+		<div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+			<label for="{uniqueID}_mission_node_name">Node Name:</label>
+			<input id="{uniqueID}_mission_node_name" type="text">
+		</div>
 
-		<div class="spacer"></div>
+		<div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+			<label for="{uniqueID}_fixed_frame">Fixed Frame:</label>
+			<select id="{uniqueID}_fixed_frame" name="topic">
+				<option value="map">map</option>
+			</select>
+		</div>
 
 		<div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
 			<label for="{uniqueID}_mission_select">Mission:</label>
 			<select id="{uniqueID}_mission_select" style="flex: 1;">
 				<option value="">-- Select Mission --</option>
 			</select>
-			<button id="{uniqueID}_load_mission" style="background-color: rgb(31, 52, 78);">Load</button>
-		</div>
-
-		<label>Use GPS coordinates:</label>
-		<input type="checkbox" id="{uniqueID}_use_gps_coordinates">
-
-		<div id="{uniqueID}_gps_service_container" style="display: none; margin-top: 10px;">
-			<div class="spacer"></div>
-			<label for="{uniqueID}_gps_import_service">GPS Import Service:</label>
-			<select id="{uniqueID}_gps_import_service" name="gps_import_service">
-				<option value="/fromLLArray">/fromLLArray</option>
-			</select>
-		</div>
-
-		<div class="spacer"></div>
-
-		<div style="display: flex; gap: 10px; align-items: center;">
-			<input type="file" id="{uniqueID}_import_input" accept=".json" style="display: none;">
-			<button id="{uniqueID}_import">⇓ Import</button>
 		</div>
 
 		<div class="spacer"></div>

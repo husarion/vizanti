@@ -7,6 +7,10 @@ class MissionRecorder {
     this.node_name = node_name;
   }
 
+  setNodeName(node_name) {
+    this.node_name = node_name;
+  }
+
   async setDoubleParameters(params) {
     let setParamClient = new ROSLIB.Service({
       ros: this.ros,
@@ -116,11 +120,11 @@ class MissionRecorder {
     });
   }
 
-  async updateMission(info, poses) {
-    let updateMissionClient = new ROSLIB.Service({
+  async overrideMission(info, poses) {
+    let overrideMissionClient = new ROSLIB.Service({
       ros: this.ros,
-      name: `${this.node_name}/update_mission`,
-      serviceType: "husarion_outdoor_nav_msgs/srv/UpdateMission"
+      name: `${this.node_name}/override_mission`,
+      serviceType: "husarion_outdoor_nav_msgs/srv/OverrideMission"
     });
 
     const request = new ROSLIB.ServiceRequest({
@@ -129,7 +133,7 @@ class MissionRecorder {
     });
 
     return new Promise((resolve, reject) => {
-      updateMissionClient.callService(request, resolve, reject);
+      overrideMissionClient.callService(request, resolve, reject);
     });
   }
 
