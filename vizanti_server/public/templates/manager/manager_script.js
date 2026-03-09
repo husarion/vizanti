@@ -66,6 +66,8 @@ setLabel("IDLE");
 
 function drawWaypoints() {
 	try {
+		canvas.height = window.innerHeight;
+		canvas.width = window.innerWidth;
 		drawWaypointsModule.drawWaypoints(canvas, ctx, view, points, tf, fixed_frame, "IDLE", 0.8, 0, false);
 		status.setOK();
 	} catch (error) {
@@ -160,7 +162,7 @@ async function loadMission() {
 	mission_status.setOK(`Mission "${missionData.name}" loaded successfully (${points.length} waypoints)`);
 }
 
-async function updateMissionSelect() {
+async function updateMissionSelect(defaultMissionID = null) {
 	let response;
 	let optionsHtml = '<option value="">-- Select Mission --</option>';
 
@@ -190,6 +192,11 @@ async function updateMissionSelect() {
 	});
 
 	missionSelect.innerHTML = optionsHtml;
+
+	if (defaultMissionID) {
+		// Try to set the default mission based on the provided ID
+		defaultMission = JSON.stringify({ id: defaultMissionID, name: missions.find(m => m.id === defaultMissionID)?.name || "" });
+	}
 
 	// Restore the default mission if it still exists
 	if (defaultMission && Array.from(missionSelect.options).some(opt => opt.value === defaultMission)) {
@@ -276,9 +283,13 @@ if (settings.hasOwnProperty("{uniqueID}")) {
 	points = loaded_data.points;
 	typedict = loaded_data.typedict ?? {};
 	fixed_frame = loaded_data.fixed_frame ?? tf.fixed_frame;
-	missionSelect.value = loaded_data.mission ?? "";
 	missionNodeNamebox.value = loaded_data.mission_node_name ?? "mission_recorder";
 	MissionRecorder.setNodeName(missionNodeNamebox.value);
+
+	if (loaded_data.mission) {
+		const missionData = JSON.parse(loaded_data.mission);
+		await updateMissionSelect(missionData.id);
+	}
 
 	for (let i = 0; i < points.length; i++) {
 		if (points[i].z == null || points[i].z == undefined)
@@ -300,9 +311,6 @@ function saveSettings() {
 	}
 	settings.save();
 }
-
-// Initialize mission select
-updateMissionSelect();
 
 // Messaging
 
@@ -522,4 +530,4 @@ window.addEventListener("tf_changed", () => {
 	}
 });
 
-console.log("Button Widget Loaded {uniqueID}")
+console.log("Manager Widget Loaded {uniqueID}")
