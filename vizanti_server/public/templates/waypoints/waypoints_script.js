@@ -13,6 +13,11 @@ let rosbridge = rosbridgeModule.rosbridge;
 let settings = persistentModule.settings;
 let Status = StatusModule.Status;
 let MissionRecorder = new missionRecorderModule.MissionRecorder(rosbridge.ros, "mission_recorder");
+let MissionWindow = new missionRecorderModule.MissionWindow(
+	document.getElementById("{uniqueID}_mission_window"),
+	document.getElementById("{uniqueID}_mission_drag_handle"),
+	saveSettings
+);
 
 let topic = getTopic("{uniqueID}");
 let status = new Status(
@@ -26,6 +31,7 @@ let base_link_frame = find_base_frame();
 let mode = "IDLE";
 let points = [];
 let shift_pressed = false;
+let mission_window_active = false;
 
 const icon_bar = document.getElementById("icon_bar");
 const icon = document.getElementById("{uniqueID}_icon");
@@ -46,6 +52,7 @@ const missionSelect = document.getElementById("{uniqueID}_mission_select");
 const missionNameInput = document.getElementById("{uniqueID}_mission_name");
 const updateMissionButton = document.getElementById("{uniqueID}_update_mission");
 const deleteMissionButton = document.getElementById("{uniqueID}_delete_mission");
+const missionWindowCloseButton = document.getElementById("{uniqueID}_mission_window_close");
 
 const recordMaxThresholdInput = document.getElementById("{uniqueID}_record_position_max_threshold");
 const recordMinThresholdInput = document.getElementById("{uniqueID}_record_position_min_threshold");
@@ -91,11 +98,18 @@ missionNodeNamebox.addEventListener("change", () => {
 	saveSettings();
 });
 
+missionSelect.addEventListener('mousedown', updateMissionSelect);
 missionSelect.addEventListener('change', () => {
 	const selectedMission = missionSelect.value;
 	const missionData = JSON.parse(selectedMission);
 	missionNameInput.value = missionData.name;
 	loadMission();
+});
+
+missionWindowCloseButton.addEventListener("click", () => {
+	MissionWindow.hide();
+	mission_window_active = false;
+	saveSettings();
 });
 
 recordMaxThresholdInput.addEventListener('change', saveSettings);
@@ -346,6 +360,16 @@ if (settings.hasOwnProperty("{uniqueID}")) {
 	fixed_frame = loaded_data.fixed_frame ?? tf.fixed_frame;
 	base_link_frame = loaded_data.base_link_frame ?? "base_link";
 
+	mission_window_active = loaded_data.mission_window_active ?? false;
+	if (mission_window_active) {
+		MissionWindow.show();
+	}
+
+	const mission_window_position = loaded_data.mission_window_position;
+	if (mission_window_position) {
+		MissionWindow.setPosition(mission_window_position);
+	}
+
 	missionNodeNamebox.value = loaded_data.mission_node_name ?? "mission_recorder";
 	// Ensure the MissionRecorder instance has the correct node name
 	MissionRecorder.setNodeName(missionNodeNamebox.value);
@@ -393,7 +417,9 @@ function saveSettings() {
 		record_position_min_threshold: recordMinThresholdInput.value,
 		record_angle_threshold: recordAngleThresholdInput.value * (Math.PI / 180),
 		use_gps_coordinates: useGpsCoordinatesCheckbox.checked,
-		selected_mission: missionSelect.value
+		selected_mission: missionSelect.value,
+		mission_window_active: mission_window_active,
+		mission_window_position: MissionWindow.getPosition()
 	}
 	settings.save();
 }
@@ -1025,6 +1051,7 @@ const drop_stop = document.getElementById("{uniqueID}_stopAction");
 const drop_record = document.getElementById("{uniqueID}_record");
 const drop_xy = document.getElementById("{uniqueID}_editXY");
 const drop_z = document.getElementById("{uniqueID}_editZ");
+const drop_mission_select = document.getElementById("{uniqueID}_mission_selection");
 const drop_config = document.getElementById("{uniqueID}_config");
 
 const startButton = document.getElementById("{uniqueID}_start");
@@ -1056,6 +1083,21 @@ drop_xy.addEventListener("click", (event) => {
 drop_z.addEventListener("click", (event) => {
 	setMode("Z");
 	dropdown_visibility(false);
+});
+
+drop_mission_select.addEventListener("click", () => {
+	MissionRecorder.setNodeName(missionNodeNamebox.value);
+	updateMissionSelect();
+
+	if (mission_window_active) {
+		MissionWindow.hide();
+	} else {
+		MissionWindow.show();
+	}
+
+	mission_window_active = !mission_window_active;
+	dropdown_visibility(false);
+	saveSettings();
 });
 
 drop_config.addEventListener("click", (event) => {

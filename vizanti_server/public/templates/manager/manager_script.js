@@ -14,6 +14,11 @@ let settings = persistentModule.settings;
 let Status = StatusModule.Status;
 let imageToDataURL = utilModule.imageToDataURL;
 let MissionRecorder = new missionRecorderModule.MissionRecorder(rosbridge.ros, "mission_recorder");
+let MissionWindow = new missionRecorderModule.MissionWindow(
+	document.getElementById("{uniqueID}_mission_window"),
+	document.getElementById("{uniqueID}_mission_drag_handle"),
+	saveSettings
+);
 
 let status = new Status(
 	document.getElementById("{uniqueID}_icon"),
@@ -30,6 +35,7 @@ let fixed_frame = tf.fixed_frame;
 let mode = "IDLE";
 let state = "IDLE";
 let points = [];
+let mission_window_active = false;
 
 const icon = document.getElementById("{uniqueID}_icon");
 const dropdown = document.getElementById("{uniqueID}_dropdown");
@@ -55,6 +61,7 @@ const drop_config = document.getElementById("{uniqueID}_config");
 const missionNodeNamebox = document.getElementById("{uniqueID}_mission_node_name");
 const missionSelect = document.getElementById("{uniqueID}_mission_select");
 const clearPathButton = document.getElementById("{uniqueID}_clear_path");
+const missionWindowCloseButton = document.getElementById("{uniqueID}_mission_window_close");
 
 function setLabel(string) {
 	icontext.textContent = string;
@@ -106,6 +113,7 @@ function subscribeCurrentState() {
 		if (msg && msg.data) {
 			state = msg.data.trim().toUpperCase();
 			drop_mission_select.style.display = "none";
+			MissionWindow.hide();
 			clearPath();
 
 			// Change background color depending on state
@@ -118,6 +126,9 @@ function subscribeCurrentState() {
 			} else if (state === "MULE") {
 				icon.style.backgroundColor = "#3498db"; // blue
 				drop_mission_select.style.display = "block";
+				if (mission_window_active) {
+					MissionWindow.show();
+				}
 				loadMission();
 			} else {
 				icon.style.backgroundColor = "#bdc3c7"; // gray default (IDLE, NOT READY)
@@ -283,8 +294,14 @@ if (settings.hasOwnProperty("{uniqueID}")) {
 	points = loaded_data.points;
 	typedict = loaded_data.typedict ?? {};
 	fixed_frame = loaded_data.fixed_frame ?? tf.fixed_frame;
+	mission_window_active = loaded_data.mission_window_active ?? false;
 	missionNodeNamebox.value = loaded_data.mission_node_name ?? "mission_recorder";
 	MissionRecorder.setNodeName(missionNodeNamebox.value);
+
+	const mission_window_position = loaded_data.mission_window_position;
+	if (mission_window_position) {
+		MissionWindow.setPosition(mission_window_position);
+	}
 
 	if (loaded_data.mission) {
 		const missionData = JSON.parse(loaded_data.mission);
@@ -307,7 +324,9 @@ function saveSettings() {
 		fixed_frame: fixed_frame,
 		points: points,
 		mission: missionSelect.value,
-		mission_node_name: missionNodeNamebox.value
+		mission_node_name: missionNodeNamebox.value,
+		mission_window_active: mission_window_active,
+		mission_window_position: MissionWindow.getPosition()
 	}
 	settings.save();
 }
@@ -485,8 +504,16 @@ drop_exit.addEventListener("click", () => {
 drop_mission_select.addEventListener("click", () => {
 	MissionRecorder.setNodeName(missionNodeNamebox.value);
 	updateMissionSelect();
-	openModal("{uniqueID}_mission_modal");
+
+	if (mission_window_active) {
+		MissionWindow.hide();
+	} else {
+		MissionWindow.show();
+	}
+
+	mission_window_active = !mission_window_active;
 	dropdown_visibility(false);
+	saveSettings();
 });
 
 drop_config.addEventListener("click", () => {
@@ -500,7 +527,14 @@ fixedFrameBox.addEventListener("change", () => {
 	saveSettings();
 });
 
+missionSelect.addEventListener('mousedown', updateMissionSelect);
 missionSelect.addEventListener('change', loadMission);
+
+missionWindowCloseButton.addEventListener("click", () => {
+	MissionWindow.hide();
+	mission_window_active = false;
+	saveSettings();
+});
 
 clearPathButton.addEventListener('click', async () => {
 	if (await confirm("Are you sure you want to delete all waypoints?")) {

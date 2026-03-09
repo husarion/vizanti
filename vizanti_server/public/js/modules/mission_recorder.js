@@ -166,4 +166,70 @@ class MissionRecorder {
   }
 }
 
-export { MissionRecorder };
+class MissionWindow {
+  constructor(windowElement, dragElement, endDragCallback) {
+    this.missionWindowElement = windowElement;
+    this.dragElement = dragElement;
+    this.endDragCallback = endDragCallback;
+    this.position = null;
+
+    // Dragging functionality
+    let isDragging = false;
+    let offsetX, offsetY;
+
+    this.dragElement.addEventListener("mousedown", (e) => {
+      isDragging = true;
+      offsetX = e.clientX - this.missionWindowElement.getBoundingClientRect().left;
+      offsetY = e.clientY - this.missionWindowElement.getBoundingClientRect().top;
+      document.body.style.userSelect = "none";
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (isDragging) {
+        const position = {
+          left: `${e.clientX - offsetX}px`,
+          top: `${e.clientY - offsetY}px`
+        };
+        this.setPosition(position);
+      }
+    });
+
+    document.addEventListener("mouseup", () => {
+      isDragging = false;
+      document.body.style.userSelect = ""; // Re-enable text selection
+      this.endDragCallback();
+    });
+  }
+
+  show() {
+    this.missionWindowElement.style.display = "block";
+  }
+
+  hide() {
+    this.missionWindowElement.style.display = "none";
+  }
+
+  isActive() {
+    return this.missionWindowElement.style.display === "block";
+  }
+
+  getPosition() {
+    if (!this.position) {
+      this.position = {
+        left: "50%",
+        top: "50%",
+        transform: "translate(-50%, -50%)"
+      };
+    }
+    return this.position;
+  }
+
+  setPosition(position) {
+    this.position = position;
+    this.missionWindowElement.style.transform = position.transform || "translate(0, 0)";
+    this.missionWindowElement.style.left = position.left || "0";
+    this.missionWindowElement.style.top = position.top || "0";
+  }
+}
+
+export { MissionRecorder, MissionWindow };

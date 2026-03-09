@@ -63,38 +63,6 @@
 
 		<div class="spacer"></div>
 
-		<h4>Mission Selector</h4>
-
-		<div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
-			<label for="{uniqueID}_mission_node_name">Node Name:</label>
-			<input id="{uniqueID}_mission_node_name" type="text" value="mission_recorder">
-		</div>
-
-		<div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
-			<label for="{uniqueID}_mission_select">Mission:</label>
-			<select id="{uniqueID}_mission_select" style="flex: 1;">
-				<option value="">-- Select Mission --</option>
-			</select>
-			<button id="{uniqueID}_delete_mission" style="background-color: rgb(104, 78, 31);">Delete</button>
-		</div>
-
-		<div style="display: flex; gap: 10px; align-items: center;">
-			<label for="{uniqueID}_mission_name">Mission Name:</label>
-			<input type="text" id="{uniqueID}_mission_name" placeholder="Mission name..." style="flex: 1;">
-			<button id="{uniqueID}_update_mission" style="background-color: rgb(31, 78, 52);">Update Mission</button>
-		</div>
-
-		<div class="spacer"></div>
-
-		<label>Use GPS coordinates:</label>
-		<input type="checkbox" id="{uniqueID}_use_gps_coordinates">
-
-		<h4>Clear Path</h4>
-
-		<button id="{uniqueID}_delete" style="background-color: rgb(104, 78, 31);">Remove all waypoints</button>
-
-		<div class="spacer"></div>
-
 		<p><strong>X/Y Axis:</strong> Edit horizontal positions.</p>
 		<ul>
 			<li><strong style="color:rgb(167, 255, 196)">Add Points:</strong> Click on the view area.</li>
@@ -128,4 +96,47 @@
 		<button id="{uniqueID}_remove" class="delete_button" onclick="removeWidget('{uniqueID}')">Remove Widget</button>
 
 	</div>
+</div>
+
+<!-- Mission Select Window (hidden by default) -->
+<div id="{uniqueID}_mission_window" class="window noselect" style="display:none;">
+	<h3>Mission Selector</h3>
+
+	<button id="{uniqueID}_mission_window_close" class="window_close" title="Close">&#10005;</button>
+
+	<div id="{uniqueID}_mission_drag_handle" class="window_drag_handle"></div>
+
+	<p id="{uniqueID}_mission_status" class="status">Status: Ok.</p>
+
+	<hr class="dark_hr" />
+
+	<div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+		<label for="{uniqueID}_mission_node_name">Node Name:</label>
+		<input id="{uniqueID}_mission_node_name" type="text" value="mission_recorder">
+	</div>
+
+	<div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+		<label for="{uniqueID}_mission_select">Mission:</label>
+		<select id="{uniqueID}_mission_select" style="flex: 1;">
+			<option value="">-- Select Mission --</option>
+		</select>
+		<button id="{uniqueID}_delete_mission" style="background-color: rgb(104, 78, 31);">Delete</button>
+	</div>
+
+	<div style="display: flex; gap: 10px; align-items: center;">
+		<label for="{uniqueID}_mission_name">Mission Name:</label>
+		<input type="text" id="{uniqueID}_mission_name" placeholder="Mission name..." style="flex: 1;">
+		<button id="{uniqueID}_update_mission" style="background-color: rgb(31, 78, 52);">Update Mission</button>
+	</div>
+
+	<div class="spacer"></div>
+
+	<label>Use GPS coordinates:</label>
+	<input type="checkbox" id="{uniqueID}_use_gps_coordinates">
+
+	<h4>Clear Path</h4>
+
+	<button id="{uniqueID}_delete" style="background-color: rgb(104, 78, 31);">Remove all waypoints</button>
+
+	<div class="spacer"></div>
 </div>
