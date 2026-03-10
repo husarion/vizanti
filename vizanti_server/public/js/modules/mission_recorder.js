@@ -177,18 +177,23 @@ class MissionWindow {
     let isDragging = false;
     let offsetX, offsetY;
 
-    this.dragElement.addEventListener("mousedown", (e) => {
+    this.dragElement.addEventListener("mousedown", (event) => {
+      event.stopPropagation(); // Prevent view drag
       isDragging = true;
-      offsetX = e.clientX - this.missionWindowElement.getBoundingClientRect().left;
-      offsetY = e.clientY - this.missionWindowElement.getBoundingClientRect().top;
+      offsetX = event.clientX - this.missionWindowElement.getBoundingClientRect().left;
+      offsetY = event.clientY - this.missionWindowElement.getBoundingClientRect().top;
       document.body.style.userSelect = "none";
     });
 
-    document.addEventListener("mousemove", (e) => {
+    this.dragElement.addEventListener("touchstart", (event) => {
+      event.stopPropagation();
+    });
+
+    document.addEventListener("mousemove", (event) => {
       if (isDragging) {
         const position = {
-          left: `${e.clientX - offsetX}px`,
-          top: `${e.clientY - offsetY}px`
+          left: `${event.clientX - offsetX}px`,
+          top: `${event.clientY - offsetY}px`
         };
         this.setPosition(position);
       }
