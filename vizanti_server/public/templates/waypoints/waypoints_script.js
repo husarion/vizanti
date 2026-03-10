@@ -24,6 +24,10 @@ let status = new Status(
 	document.getElementById("{uniqueID}_icon"),
 	document.getElementById("{uniqueID}_status")
 );
+let mission_status = new Status(
+	document.getElementById("{uniqueID}_icon"),
+	document.getElementById("{uniqueID}_mission_status")
+);
 
 let typedict = {};
 let fixed_frame = tf.fixed_frame;
@@ -119,10 +123,10 @@ recordAngleThresholdInput.addEventListener('change', saveSettings);
 function drawWaypoints() {
 	try {
 		drawWaypointsModule.drawWaypoints(canvas, ctx, view, points, tf, fixed_frame, mode, margin.value, getStartIndex());
-		status.setOK();
+		mission_status.setOK();
 	} catch (error) {
 		console.error("Error drawing waypoints:", error);
-		status.setError(`Failed to draw waypoints: ${error.message}`);
+		mission_status.setError(`Failed to draw waypoints: ${error.message}`);
 	}
 }
 
@@ -139,18 +143,18 @@ function screenToPoint(click) {
 async function updateMission() {
 	const selectedMission = missionSelect.value;
 	if (!selectedMission) {
-		status.setWarn("Please select a mission to update");
+		mission_status.setWarn("Please select a mission to update");
 		return;
 	}
 
 	const missionName = missionNameInput.value;
 	if (!missionName) {
-		status.setWarn("Mission name cannot be empty");
+		mission_status.setWarn("Mission name cannot be empty");
 		return;
 	}
 
 	if (points.length === 0) {
-		status.setWarn("No waypoints to save");
+		mission_status.setWarn("No waypoints to save");
 		return;
 	}
 
@@ -174,18 +178,18 @@ async function updateMission() {
 	const result = await MissionRecorder.overrideMission(info, poses);
 
 	if (!result.success) {
-		status.setError(`Failed to update mission: ${result.message}`);
+		mission_status.setError(`Failed to update mission: ${result.message}`);
 		return;
 	}
 
 	updateMissionSelect(missionData.id);
-	status.setOK(`Mission "${missionName}" updated successfully`);
+	mission_status.setOK(`Mission "${missionName}" updated successfully`);
 }
 
 async function loadMission() {
 	const selectedMission = missionSelect.value;
 	if (!selectedMission) {
-		status.setWarn("Please select a mission to load");
+		mission_status.setWarn("Please select a mission to load");
 		return;
 	}
 
@@ -193,7 +197,7 @@ async function loadMission() {
 	const result = await MissionRecorder.getMission(missionData.id);
 
 	if (!result.success) {
-		status.setError(`Failed to load mission: ${result.message}`);
+		mission_status.setError(`Failed to load mission: ${result.message}`);
 		return;
 	}
 
@@ -207,13 +211,13 @@ async function loadMission() {
 
 	drawWaypoints();
 	saveSettings();
-	status.setOK(`Mission "${missionData.name}" loaded successfully (${points.length} waypoints)`);
+	mission_status.setOK(`Mission "${missionData.name}" loaded successfully (${points.length} waypoints)`);
 }
 
 async function deleteMission() {
 	const selectedMission = missionSelect.value;
 	if (!selectedMission) {
-		status.setWarn("Please select a mission to delete");
+		mission_status.setWarn("Please select a mission to delete");
 		return;
 	}
 
@@ -226,13 +230,13 @@ async function deleteMission() {
 	const result = await MissionRecorder.deleteMission(missionData.id);
 
 	if (!result.success) {
-		status.setError(`Failed to delete mission: ${result.message}`);
+		mission_status.setError(`Failed to delete mission: ${result.message}`);
 		return;
 	}
 
 	updateMissionSelect();
 	missionNameInput.value = "";
-	status.setOK(`Mission "${missionData.name}" deleted successfully`);
+	mission_status.setOK(`Mission "${missionData.name}" deleted successfully`);
 }
 
 async function updateMissionSelect(defaultMissionID = null) {
@@ -242,13 +246,13 @@ async function updateMissionSelect(defaultMissionID = null) {
 	try {
 		response = await MissionRecorder.listMissions();
 	} catch (error) {
-		status.setError(`Failed to list missions: ${error.message}`);
+		mission_status.setError(`Failed to list missions: ${error.message}`);
 		missionSelect.innerHTML = optionsHtml;
 		return;
 	}
 
 	if (!response.success) {
-		status.setError(`Failed to load missions: ${response.message}`);
+		mission_status.setError(`Failed to load missions: ${response.message}`);
 		missionSelect.innerHTML = optionsHtml;
 		return;
 	}
@@ -277,7 +281,7 @@ async function updateMissionSelect(defaultMissionID = null) {
 		missionNameInput.value = JSON.parse(defaultMission).name;
 	}
 
-	status.setOK();
+	mission_status.setOK();
 }
 
 // Position recording
@@ -902,7 +906,7 @@ const baseLinkFrameBox = document.getElementById("{uniqueID}_base_link_frame");
 selectionbox.addEventListener("change", (event) => {
 	topic = selectionbox.value;
 	saveSettings();
-	status.setOK();
+	mission_status.setOK();
 });
 
 fixedFrameBox.addEventListener("change", (event) => {
