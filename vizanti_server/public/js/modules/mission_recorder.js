@@ -185,10 +185,6 @@ class MissionWindow {
       document.body.style.userSelect = "none";
     });
 
-    this.dragElement.addEventListener("touchstart", (event) => {
-      event.stopPropagation();
-    });
-
     document.addEventListener("mousemove", (event) => {
       if (isDragging) {
         const position = {
