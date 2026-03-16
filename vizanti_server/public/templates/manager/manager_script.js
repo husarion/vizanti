@@ -527,7 +527,10 @@ fixedFrameBox.addEventListener("change", () => {
 	saveSettings();
 });
 
-missionSelect.addEventListener('mousedown', updateMissionSelect);
+missionSelect.addEventListener('mousedown', () => {
+	updateMissionSelect();
+});
+
 missionSelect.addEventListener('change', loadMission);
 
 missionWindowCloseButton.addEventListener("click", () => {
