@@ -4,8 +4,8 @@ let rosbridgeModule = await import(`${base_url}/js/modules/rosbridge.js`);
 let persistentModule = await import(`${base_url}/js/modules/persistent.js`);
 let StatusModule = await import(`${base_url}/js/modules/status.js`);
 let utilModule = await import(`${base_url}/js/modules/util.js`);
-let missionUtils = await import(`${base_url}/js/modules/mission_utils.js`);
 let drawWaypointsModule = await import(`${base_url}/js/modules/draw_waypoints.js`);
+let missionRecorderModule = await import(`${base_url}/js/modules/mission_recorder.js`);
 
 let view = viewModule.view;
 let tf = tfModule.tf;
@@ -13,6 +13,12 @@ let rosbridge = rosbridgeModule.rosbridge;
 let settings = persistentModule.settings;
 let Status = StatusModule.Status;
 let imageToDataURL = utilModule.imageToDataURL;
+let MissionRecorder = new missionRecorderModule.MissionRecorder(rosbridge.ros, "mission_recorder");
+let MissionWindow = new missionRecorderModule.MissionWindow(
+	document.getElementById("{uniqueID}_mission_window"),
+	document.getElementById("{uniqueID}_mission_drag_handle"),
+	saveSettings
+);
 
 let status = new Status(
 	document.getElementById("{uniqueID}_icon"),
@@ -29,9 +35,7 @@ let fixed_frame = tf.fixed_frame;
 let mode = "IDLE";
 let state = "IDLE";
 let points = [];
-
-let gpsImportServiceDict = {};
-let selectedGpsImportService = "";
+let mission_window_active = false;
 
 const icon = document.getElementById("{uniqueID}_icon");
 const dropdown = document.getElementById("{uniqueID}_dropdown");
@@ -42,7 +46,7 @@ const icontext = icondiv.getElementsByTagName('p')[0];
 const canvas = document.getElementById('{uniqueID}_canvas');
 const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
 
-const nodenamebox = document.getElementById("{uniqueID}_nodename");
+const nodeNamebox = document.getElementById("{uniqueID}_node_name");
 const fixedFrameBox = document.getElementById("{uniqueID}_fixed_frame");
 
 const drop_start = document.getElementById("{uniqueID}_start");
@@ -54,15 +58,10 @@ const drop_exit = document.getElementById("{uniqueID}_exit");
 const drop_mission_select = document.getElementById("{uniqueID}_mission_selection");
 const drop_config = document.getElementById("{uniqueID}_config");
 
-const importButton = document.getElementById("{uniqueID}_import");
-const importInput = document.getElementById("{uniqueID}_import_input");
-const useGpsCoordinatesCheckbox = document.getElementById("{uniqueID}_use_gps_coordinates");
-const gpsServiceContainer = document.getElementById("{uniqueID}_gps_service_container");
-const gpsImportServiceBox = document.getElementById("{uniqueID}_gps_import_service");
-
+const missionNodeNamebox = document.getElementById("{uniqueID}_mission_node_name");
 const missionSelect = document.getElementById("{uniqueID}_mission_select");
-const loadMissionButton = document.getElementById("{uniqueID}_load_mission");
 const clearPathButton = document.getElementById("{uniqueID}_clear_path");
+const missionWindowCloseButton = document.getElementById("{uniqueID}_mission_window_close");
 
 function setLabel(string) {
 	icontext.textContent = string;
@@ -74,6 +73,8 @@ setLabel("IDLE");
 
 function drawWaypoints() {
 	try {
+		canvas.height = window.innerHeight;
+		canvas.width = window.innerWidth;
 		drawWaypointsModule.drawWaypoints(canvas, ctx, view, points, tf, fixed_frame, "IDLE", 0.8, 0, false);
 		status.setOK();
 	} catch (error) {
@@ -101,7 +102,7 @@ function clearPath() {
 function subscribeCurrentState() {
 	const stateTopic = new ROSLIB.Topic({
 		ros: rosbridge.ros,
-		name: nodenamebox.value + "/current_state",
+		name: nodeNamebox.value + "/current_state",
 		messageType: "std_msgs/String",
 		qos: {
 			durability: "transient_local"
@@ -112,6 +113,7 @@ function subscribeCurrentState() {
 		if (msg && msg.data) {
 			state = msg.data.trim().toUpperCase();
 			drop_mission_select.style.display = "none";
+			MissionWindow.hide();
 			clearPath();
 
 			// Change background color depending on state
@@ -124,6 +126,9 @@ function subscribeCurrentState() {
 			} else if (state === "MULE") {
 				icon.style.backgroundColor = "#3498db"; // blue
 				drop_mission_select.style.display = "block";
+				if (mission_window_active) {
+					MissionWindow.show();
+				}
 				loadMission();
 			} else {
 				icon.style.backgroundColor = "#bdc3c7"; // gray default (IDLE, NOT READY)
@@ -135,49 +140,7 @@ function subscribeCurrentState() {
 	});
 }
 
-async function loadGpsServices() {
-	try {
-		console.log("Loading GPS coordinate services...");
-		const toLLServices = await rosbridge.get_services("robot_localization/srv/ToLL");
-		const fromLLArrayServices = await rosbridge.get_services("robot_localization/srv/FromLLArray");
-
-		let importServiceList = "";
-
-		// Add FromLLArray services (preferred for import)
-		fromLLArrayServices.forEach(service => {
-			importServiceList += `<option value='${service}'>${service} (FromLLArray)</option>`;
-			gpsImportServiceDict[service] = "robot_localization/srv/FromLLArray";
-		});
-
-		gpsImportServiceBox.innerHTML = importServiceList;
-
-		if (importServiceList === "") {
-			console.log(`No FromLLArray services found, defaulting to ${selectedGpsImportService}`);
-			gpsImportServiceBox.innerHTML = `<option value='${selectedGpsImportService}'>${selectedGpsImportService} (default)</option>`;
-		}
-
-		if (fromLLArrayServices.includes(selectedGpsImportService)) {
-			gpsImportServiceBox.value = selectedGpsImportService;
-		} else {
-			selectedGpsImportService = gpsImportServiceBox.value;
-		}
-
-	} catch (error) {
-		console.error("Error loading GPS services:", error);
-		mission_status.setWarn("Failed to load GPS coordinate services");
-	}
-}
-
 // Mission management
-
-function getMissionKey() {
-	return "{uniqueID}_missions";
-}
-
-function getSavedMissions() {
-	const missionKey = getMissionKey();
-	return settings[missionKey] || {};
-}
 
 async function loadMission() {
 	const selectedMission = missionSelect.value;
@@ -186,29 +149,20 @@ async function loadMission() {
 		return;
 	}
 
-	const missions = getSavedMissions();
-	const missionData = missions[selectedMission];
+	const missionData = JSON.parse(selectedMission);
+	const result = await MissionRecorder.getMission(missionData.id);
 
-	if (!missionData) {
-		mission_status.setError("Mission not found");
+	if (!result.success) {
+		status.setError(`Failed to load mission: ${result.message}`);
 		return;
 	}
 
-	console.log("Mission data:", missionData);
-
-	// Ask user if they want to replace existing waypoints
-	if (points.length > 0) {
-		const replace = await confirm(`Replace current waypoints with mission "${selectedMission}"?`);
-		if (!replace) {
-			return;
-		}
-	}
-
 	// Load waypoints
-	points = missionData.waypoints.map(wp => ({
-		x: wp.x || 0,
-		y: wp.y || 0,
-		z: wp.z || 0
+	const mission = result.mission;
+	points = mission.poses.map(pose => ({
+		x: pose.position.x || 0,
+		y: pose.position.y || 0,
+		z: pose.position.z || 0
 	}));
 
 	publishPoseArray(points);
@@ -216,22 +170,51 @@ async function loadMission() {
 	drawWaypoints();
 
 	saveSettings();
-	mission_status.setOK(`Mission "${selectedMission}" loaded successfully (${points.length} waypoints)`);
+	mission_status.setOK(`Mission "${missionData.name}" loaded successfully (${points.length} waypoints)`);
 }
 
-function updateMissionSelect() {
-	const missions = getSavedMissions();
-	const missionNames = Object.keys(missions).sort();
-
+async function updateMissionSelect(defaultMissionID = null) {
+	let response;
 	let optionsHtml = '<option value="">-- Select Mission --</option>';
-	missionNames.forEach(name => {
-		const mission = missions[name];
-		const waypointCount = mission.waypoints ? mission.waypoints.length : 0;
-		const date = new Date(mission.date).toLocaleDateString();
-		optionsHtml += `<option value="${name}">${name} (${waypointCount} points, ${date})</option>`;
+
+	try {
+		response = await MissionRecorder.listMissions();
+	} catch (error) {
+		mission_status.setError(`Failed to list missions: ${error.message}`);
+		missionSelect.innerHTML = optionsHtml;
+		return;
+	}
+
+	if (!response.success) {
+		mission_status.setError(`Failed to load missions: ${response.message}`);
+		missionSelect.innerHTML = optionsHtml;
+		return;
+	}
+
+	const missions = response.missions;
+
+	// Save the currently selected value
+	let defaultMission = missionSelect.value;
+
+	missions.forEach(mission => {
+		// Store both id and name as a JSON string in the value attribute
+		const optionValue = JSON.stringify({ id: mission.id, name: mission.name });
+		optionsHtml += `<option value='${optionValue}'>${mission.name} (ID: ${mission.id})</option>`;
 	});
 
 	missionSelect.innerHTML = optionsHtml;
+
+	if (defaultMissionID) {
+		// Try to set the default mission based on the provided ID
+		defaultMission = JSON.stringify({ id: defaultMissionID, name: missions.find(m => m.id === defaultMissionID)?.name || "" });
+	}
+
+	// Restore the default mission if it still exists
+	if (defaultMission && Array.from(missionSelect.options).some(opt => opt.value === defaultMission)) {
+		missionSelect.value = defaultMission;
+	}
+
+	mission_status.setOK();
 }
 
 function publishPoseArray(pointList) {
@@ -265,7 +248,7 @@ function publishPoseArray(pointList) {
 
 	const publisher = new ROSLIB.Topic({
 		ros: rosbridge.ros,
-		name: nodenamebox.value + "/current_state/update_poses",
+		name: nodeNamebox.value + "/current_state/update_poses",
 		messageType: "geometry_msgs/msg/PoseArray",
 	});
 
@@ -303,27 +286,26 @@ function getPose(x, y, z, quat) {
 	});
 }
 
-// Initialize mission select
-updateMissionSelect();
-
 // Settings
 
 if (settings.hasOwnProperty("{uniqueID}")) {
 	const loaded_data = settings["{uniqueID}"];
-	nodenamebox.value = loaded_data.nodename ?? "navigation_manager";
+	nodeNamebox.value = loaded_data.node_name ?? "navigation_manager";
 	points = loaded_data.points;
 	typedict = loaded_data.typedict ?? {};
 	fixed_frame = loaded_data.fixed_frame ?? tf.fixed_frame;
-	missionSelect.value = loaded_data.mission ?? "";
+	mission_window_active = loaded_data.mission_window_active ?? false;
+	missionNodeNamebox.value = loaded_data.mission_node_name ?? "mission_recorder";
+	MissionRecorder.setNodeName(missionNodeNamebox.value);
 
-	useGpsCoordinatesCheckbox.checked = loaded_data.use_gps_coordinates;
+	const mission_window_position = loaded_data.mission_window_position;
+	if (mission_window_position) {
+		MissionWindow.setPosition(mission_window_position);
+	}
 
-	selectedGpsImportService = loaded_data.gps_import_service ?? "/fromLLArray";
-
-	// Show GPS service container if GPS coordinates are enabled
-	if (loaded_data.use_gps_coordinates) {
-		gpsServiceContainer.style.display = 'block';
-		loadGpsServices();
+	if (loaded_data.mission) {
+		const missionData = JSON.parse(loaded_data.mission);
+		await updateMissionSelect(missionData.id);
 	}
 
 	for (let i = 0; i < points.length; i++) {
@@ -337,13 +319,14 @@ if (settings.hasOwnProperty("{uniqueID}")) {
 
 function saveSettings() {
 	settings["{uniqueID}"] = {
-		nodename: nodenamebox.value,
+		node_name: nodeNamebox.value,
 		typedict: typedict,
 		fixed_frame: fixed_frame,
 		points: points,
-		use_gps_coordinates: useGpsCoordinatesCheckbox.checked,
-		gps_import_service: selectedGpsImportService,
-		mission: missionSelect.value
+		mission: missionSelect.value,
+		mission_node_name: missionNodeNamebox.value,
+		mission_window_active: mission_window_active,
+		mission_window_position: MissionWindow.getPosition()
 	}
 	settings.save();
 }
@@ -382,7 +365,6 @@ function callService(serviceName) {
 
 async function loadServices() {
 	let triggerSrvs = await rosbridge.get_services("std_srvs/srv/Trigger");
-	console.log(triggerSrvs);
 
 	let foundServices = {
 		start: false,
@@ -394,7 +376,7 @@ async function loadServices() {
 	};
 
 	triggerSrvs.forEach(element => {
-		if (element.includes(nodenamebox.value)) {
+		if (element.includes(nodeNamebox.value)) {
 			typedict[element] = "std_srvs/srv/Trigger";
 
 			if (element.endsWith("/start")) foundServices.start = true;
@@ -483,98 +465,79 @@ document.addEventListener("click", (event) => {
 	}
 });
 
-drop_start.addEventListener("click", (event) => {
+drop_start.addEventListener("click", () => {
 	let found = Object.keys(typedict).find(k => k.endsWith("/start"));
 	if (found) callService(found);
 	dropdown_visibility(false);
 });
 
-drop_continue.addEventListener("click", (event) => {
+drop_continue.addEventListener("click", () => {
 	let found = Object.keys(typedict).find(k => k.endsWith("/continue"));
 	if (found) callService(found);
 	dropdown_visibility(false);
 });
 
-drop_stop.addEventListener("click", (event) => {
+drop_stop.addEventListener("click", () => {
 	let found = Object.keys(typedict).find(k => k.endsWith("/stop"));
 	if (found) callService(found);
 	dropdown_visibility(false);
 });
 
-drop_follow_me.addEventListener("click", (event) => {
+drop_follow_me.addEventListener("click", () => {
 	let found = Object.keys(typedict).find(k => k.endsWith("/init_follow_me"));
 	if (found) callService(found);
 	dropdown_visibility(false);
 });
 
-drop_mule.addEventListener("click", (event) => {
+drop_mule.addEventListener("click", () => {
 	let found = Object.keys(typedict).find(k => k.endsWith("/init_mule"));
 	if (found) callService(found);
 	dropdown_visibility(false);
 });
 
-drop_exit.addEventListener("click", (event) => {
+drop_exit.addEventListener("click", () => {
 	let found = Object.keys(typedict).find(k => k.endsWith("/exit"));
 	if (found) callService(found);
 	dropdown_visibility(false);
 });
 
-drop_mission_select.addEventListener("click", (event) => {
-	openModal("{uniqueID}_mission_modal");
+drop_mission_select.addEventListener("click", () => {
+	MissionRecorder.setNodeName(missionNodeNamebox.value);
+	updateMissionSelect();
+
+	if (mission_window_active) {
+		MissionWindow.hide();
+	} else {
+		MissionWindow.show();
+	}
+
+	mission_window_active = !mission_window_active;
 	dropdown_visibility(false);
+	saveSettings();
 });
 
-drop_config.addEventListener("click", (event) => {
+drop_config.addEventListener("click", () => {
 	loadServices();
 	openModal("{uniqueID}_modal");
 	dropdown_visibility(false);
 });
 
-fixedFrameBox.addEventListener("change", (event) => {
+fixedFrameBox.addEventListener("change", () => {
 	fixed_frame = fixedFrameBox.value;
 	saveSettings();
 });
 
-importButton.addEventListener('click', () => {
-	importInput.click();
+missionSelect.addEventListener('mousedown', () => {
+	updateMissionSelect();
 });
 
-importInput.addEventListener('change', async (event) => {
-	const file = event.target.files[0];
-	if (file) {
-		try {
-			const convertedMissions = await missionUtils.importMissionsFromFile(file, getSavedMissions(), useGpsCoordinatesCheckbox.checked, selectedGpsImportService);
+missionSelect.addEventListener('change', loadMission);
 
-			const missionKey = getMissionKey();
-			settings[missionKey] = convertedMissions;
-			settings.save();
-
-			updateMissionSelect();
-
-			mission_status.setOK("Missions imported successfully");
-		} catch (error) {
-			mission_status.setError(`Failed to import missions: ${error.message}`);
-			importInput.value = '';
-		}
-	}
-});
-
-useGpsCoordinatesCheckbox.addEventListener('change', () => {
-	if (useGpsCoordinatesCheckbox.checked) {
-		gpsServiceContainer.style.display = 'block';
-		loadGpsServices();
-	} else {
-		gpsServiceContainer.style.display = 'none';
-	}
+missionWindowCloseButton.addEventListener("click", () => {
+	MissionWindow.hide();
+	mission_window_active = false;
 	saveSettings();
 });
-
-gpsImportServiceBox.addEventListener("change", (event) => {
-	selectedGpsImportService = gpsImportServiceBox.value;
-	saveSettings();
-});
-
-loadMissionButton.addEventListener('click', loadMission);
 
 clearPathButton.addEventListener('click', async () => {
 	if (await confirm("Are you sure you want to delete all waypoints?")) {
@@ -582,8 +545,14 @@ clearPathButton.addEventListener('click', async () => {
 	}
 });
 
-nodenamebox.addEventListener("change", (event) => {
+nodeNamebox.addEventListener("change", () => {
 	subscribeCurrentState();
+	saveSettings();
+});
+
+missionNodeNamebox.addEventListener("change", () => {
+	MissionRecorder.setNodeName(missionNodeNamebox.value);
+	updateMissionSelect();
 	saveSettings();
 });
 
@@ -598,4 +567,4 @@ window.addEventListener("tf_changed", () => {
 	}
 });
 
-console.log("Button Widget Loaded {uniqueID}")
+console.log("Manager Widget Loaded {uniqueID}")
