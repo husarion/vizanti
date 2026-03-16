@@ -177,6 +177,10 @@ class MissionWindow {
     let isDragging = false;
     let offsetX, offsetY;
 
+    this.missionWindowElement.addEventListener("mousedown", (event) => {
+      event.stopPropagation(); // Prevent view drag
+    });
+
     this.dragElement.addEventListener("mousedown", (event) => {
       event.stopPropagation(); // Prevent view drag
       isDragging = true;
