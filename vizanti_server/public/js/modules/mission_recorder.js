@@ -35,11 +35,11 @@ class MissionRecorder {
     });
   }
 
-  async startRecording(feedbackCallback) {
+  async startRecording(feedbackCallback, saveAsGps = false) {
     let startRecordingClient = new ROSLIB.Service({
       ros: this.ros,
       name: `${this.node_name}/start_recording`,
-      serviceType: "std_srvs/srv/Trigger"
+      serviceType: "husarion_outdoor_nav_msgs/srv/StartRecording"
     });
 
     let feedbackTopic = new ROSLIB.Topic({
@@ -51,8 +51,12 @@ class MissionRecorder {
       feedbackCallback(message);
     });
 
+    const request = new ROSLIB.ServiceRequest({
+      save_as_gps: saveAsGps
+    });
+
     return new Promise((resolve, reject) => {
-      startRecordingClient.callService({}, resolve, reject);
+      startRecordingClient.callService(request, resolve, reject);
     });
   }
 

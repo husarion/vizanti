@@ -26,7 +26,7 @@
 		<p style="color: #b4b4b4;">Defines a sequence of poses and publishes them as a nav_msgs/Path or
 			geometry_msgs/PoseArray.</p>
 
-		<div class="spacer"></div>
+		<hr class="dark_hr" />
 
 		<p><strong>Record:</strong> Record positions automatically based on robot position.</p>
 
@@ -44,12 +44,19 @@
 		<input type="number" id="{uniqueID}_record_angle_threshold" value="30" step="1" min="0" max="180"
 			style="width: 80px;">
 
+		<div class="spacer"></div>
+
+		<label>Save as GPS coordinates:</label>
+		<input type="checkbox" id="{uniqueID}_save_as_gps_coordinates">
+
 		<p style="color: #b4b4b4;">
 			The max distance the robot can diverge from the path being recorded is denoted by the following equation:
 			<br>
 			err = record_position_max_threshold * tan(record_angle_threshold)
 		</p>
 		<p style="color: #b4b4b4;">When recording positions, click the icon again to stop recording.</p>
+
+		<hr class="dark_hr" />
 
 		<div class="spacer"></div>
 
