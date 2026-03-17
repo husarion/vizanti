@@ -103,7 +103,10 @@ missionNodeNamebox.addEventListener("change", async () => {
 	saveSettings();
 });
 
-missionSelect.addEventListener('mousedown', updateMissionSelect);
+missionSelect.addEventListener('mousedown', () => {
+	updateMissionSelect();
+});
+
 missionSelect.addEventListener('change', () => {
 	const selectedMission = missionSelect.value;
 	const missionData = JSON.parse(selectedMission);
