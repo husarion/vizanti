@@ -49,11 +49,12 @@ const flipButton = document.getElementById("{uniqueID}_flip");
 const zSetButton = document.getElementById("{uniqueID}_z_set");
 const deleteButton = document.getElementById("{uniqueID}_delete");
 
-const useGpsCoordinatesCheckbox = document.getElementById("{uniqueID}_use_gps_coordinates");
+const saveAsGpsCoordinatesCheckbox = document.getElementById("{uniqueID}_save_as_gps_coordinates");
 
 const missionNodeNamebox = document.getElementById("{uniqueID}_mission_node_name");
 const missionSelect = document.getElementById("{uniqueID}_mission_select");
 const missionNameInput = document.getElementById("{uniqueID}_mission_name");
+const missionTypeSelect = document.getElementById("{uniqueID}_mission_type");
 const updateMissionButton = document.getElementById("{uniqueID}_update_mission");
 const deleteMissionButton = document.getElementById("{uniqueID}_delete_mission");
 const missionWindowCloseButton = document.getElementById("{uniqueID}_mission_window_close");
@@ -91,14 +92,14 @@ startCheckbox.addEventListener('change', () => {
 	saveSettings();
 });
 
-useGpsCoordinatesCheckbox.addEventListener('change', saveSettings);
+saveAsGpsCoordinatesCheckbox.addEventListener('change', saveSettings);
 
 updateMissionButton.addEventListener('click', updateMission);
 deleteMissionButton.addEventListener('click', deleteMission);
 
-missionNodeNamebox.addEventListener("change", () => {
+missionNodeNamebox.addEventListener("change", async () => {
 	MissionRecorder.setNodeName(missionNodeNamebox.value);
-	updateMissionSelect();
+	await updateMissionSelect();
 	saveSettings();
 });
 
@@ -110,6 +111,7 @@ missionSelect.addEventListener('change', () => {
 	const selectedMission = missionSelect.value;
 	const missionData = JSON.parse(selectedMission);
 	missionNameInput.value = missionData.name;
+	missionTypeSelect.value = missionData.type;
 	loadMission();
 });
 
@@ -126,7 +128,6 @@ recordAngleThresholdInput.addEventListener('change', saveSettings);
 function drawWaypoints() {
 	try {
 		drawWaypointsModule.drawWaypoints(canvas, ctx, view, points, tf, fixed_frame, mode, margin.value, getStartIndex());
-		mission_status.setOK();
 	} catch (error) {
 		console.error("Error drawing waypoints:", error);
 		mission_status.setError(`Failed to draw waypoints: ${error.message}`);
@@ -161,13 +162,12 @@ async function updateMission() {
 		return;
 	}
 
-	const useGPS = useGpsCoordinatesCheckbox.checked;
 	const missionData = JSON.parse(selectedMission);
 
 	const info = {
 		id: missionData.id,
 		name: missionName,
-		type: useGPS ? "gps" : "cartesian",
+		type: missionTypeSelect.value,
 	};
 
 	const poses = points.map(point => ({
@@ -185,7 +185,7 @@ async function updateMission() {
 		return;
 	}
 
-	updateMissionSelect(missionData.id);
+	await updateMissionSelect(missionData.id);
 	mission_status.setOK(`Mission "${missionName}" updated successfully`);
 }
 
@@ -237,7 +237,7 @@ async function deleteMission() {
 		return;
 	}
 
-	updateMissionSelect();
+	await updateMissionSelect();
 	missionNameInput.value = "";
 	mission_status.setOK(`Mission "${missionData.name}" deleted successfully`);
 }
@@ -266,8 +266,8 @@ async function updateMissionSelect(defaultMissionID = null) {
 	let defaultMission = missionSelect.value;
 
 	missions.forEach(mission => {
-		// Store both id and name as a JSON string in the value attribute
-		const optionValue = JSON.stringify({ id: mission.id, name: mission.name });
+		// Store id, name and type as a JSON string in the value attribute
+		const optionValue = JSON.stringify({ id: mission.id, name: mission.name, type: mission.type });
 		optionsHtml += `<option value='${optionValue}'>${mission.name} (ID: ${mission.id})</option>`;
 	});
 
@@ -275,13 +275,18 @@ async function updateMissionSelect(defaultMissionID = null) {
 
 	if (defaultMissionID) {
 		// Try to set the default mission based on the provided ID
-		defaultMission = JSON.stringify({ id: defaultMissionID, name: missions.find(m => m.id === defaultMissionID)?.name || "" });
+		defaultMission = JSON.stringify({
+			id: defaultMissionID,
+			name: missions.find(m => m.id === defaultMissionID)?.name || "",
+			type: missions.find(m => m.id === defaultMissionID)?.type || ""
+		});
 	}
 
 	// Restore the default mission if it still exists
 	if (defaultMission && Array.from(missionSelect.options).some(opt => opt.value === defaultMission)) {
 		missionSelect.value = defaultMission;
 		missionNameInput.value = JSON.parse(defaultMission).name;
+		missionTypeSelect.value = JSON.parse(defaultMission).type;
 	}
 
 	mission_status.setOK();
@@ -301,7 +306,7 @@ async function startPositionRecording() {
 		drawWaypoints();
 	}
 
-	const result = await MissionRecorder.startRecording(posesCallback);
+	const result = await MissionRecorder.startRecording(posesCallback, saveAsGpsCoordinatesCheckbox.checked);
 	if (result.success) {
 		console.log("Started recording waypoints");
 	} else {
@@ -330,8 +335,7 @@ async function stopPositionRecording() {
 		z: pose.position.z
 	}));
 
-	// TODO: update mission select to include the new mission and select it
-	updateMissionSelect(latestMissionID);
+	await updateMissionSelect(latestMissionID);
 
 	drawWaypoints();
 	saveSettings();
@@ -388,9 +392,12 @@ if (settings.hasOwnProperty("{uniqueID}")) {
 	recordMinThresholdInput.value = loaded_data.record_position_min_threshold ?? 0.5;
 	recordAngleThresholdInput.value = Math.round((loaded_data.record_angle_threshold ?? 0.52) * (180 / Math.PI));
 
-	useGpsCoordinatesCheckbox.checked = loaded_data.use_gps_coordinates;
+	saveAsGpsCoordinatesCheckbox.checked = loaded_data.save_as_gps_coordinates;
 
-	missionSelect.value = loaded_data.selected_mission;
+	if (loaded_data.selected_mission) {
+		const missionData = JSON.parse(loaded_data.selected_mission);
+		await updateMissionSelect(missionData.id);
+	}
 
 	if (loaded_data.topic_type != undefined)
 		typedict[topic] = loaded_data.topic_type;
@@ -423,7 +430,7 @@ function saveSettings() {
 		record_position_max_threshold: recordMaxThresholdInput.value,
 		record_position_min_threshold: recordMinThresholdInput.value,
 		record_angle_threshold: recordAngleThresholdInput.value * (Math.PI / 180),
-		use_gps_coordinates: useGpsCoordinatesCheckbox.checked,
+		save_as_gps_coordinates: saveAsGpsCoordinatesCheckbox.checked,
 		selected_mission: missionSelect.value,
 		mission_window_active: mission_window_active,
 		mission_window_position: MissionWindow.getPosition()
@@ -1110,7 +1117,6 @@ drop_mission_select.addEventListener("click", () => {
 drop_config.addEventListener("click", (event) => {
 	loadTopics();
 	MissionRecorder.setNodeName(missionNodeNamebox.value);
-	updateMissionSelect();
 	openModal("{uniqueID}_modal");
 	dropdown_visibility(false);
 });

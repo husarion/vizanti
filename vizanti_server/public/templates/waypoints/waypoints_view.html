@@ -25,20 +25,30 @@
 		<button id="{uniqueID}_delete_mission" style="background-color: rgb(104, 78, 31);">Delete</button>
 	</div>
 
-	<div style="display: flex; gap: 10px; align-items: center;">
-		<label for="{uniqueID}_mission_name">Mission Name:</label>
-		<input type="text" id="{uniqueID}_mission_name" placeholder="Mission name..." style="flex: 1;">
-		<button id="{uniqueID}_update_mission" style="background-color: rgb(31, 78, 52);">Update Mission</button>
+	<hr class="dark_hr" />
+
+	<div style="display: flex; gap: 10px; align-items: flex-end;">
+		<div styple="display: flex, flex-direction: column;">
+
+			<div style="display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 1;">
+				<label for="{uniqueID}_mission_name">Mission Name:</label>
+				<input type="text" id="{uniqueID}_mission_name" placeholder="Mission name..." style="flex: 1;">
+			</div>
+			<div style="display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 1;">
+				<label for="{uniqueID}_mission_type">Mission Type:</label>
+				<select id="{uniqueID}_mission_type" style="flex: 1;">
+					<option value="cartesian">Cartesian</option>
+					<option value="gps">GPS</option>
+				</select>
+			</div>
+		</div>
+			<button id="{uniqueID}_update_mission"
+			style="background-color: rgb(31, 78, 52); height: 56px; align-self: stretch;">Update Mission</button>
 	</div>
 
-	<div class="spacer"></div>
+	<hr class="dark_hr" />
 
-	<label>Use GPS coordinates:</label>
-	<input type="checkbox" id="{uniqueID}_use_gps_coordinates">
-
-	<h4>Clear Path</h4>
-
-	<button id="{uniqueID}_delete" style="background-color: rgb(104, 78, 31);">Remove all waypoints</button>
+	<button id="{uniqueID}_delete" style="background-color: rgb(104, 78, 31);">Clear path</button>
 
 	<div class="spacer"></div>
 </div>

@@ -747,6 +747,11 @@ button {
 	float: right;
 }
 
+button:active {
+	transform: scale(0.98) !important;
+  filter: brightness(0.9);
+}
+
 button:hover{
 	transform: scale(1.02);
 	text-decoration: none;
